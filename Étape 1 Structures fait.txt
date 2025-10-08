@@ -1,0 +1,5 @@
+Étape 1: Structures ✅ (fait)
+Étape 2: Fonctions de base (calcul moyenne, etc.)
+Étape 3: Sauvegarde/chargement fichier
+Étape 4: OCR (scanner les images)
+Étape 5: Interface utilisateur
