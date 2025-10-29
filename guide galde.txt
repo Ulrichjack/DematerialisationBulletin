@@ -1,0 +1,2223 @@
+# 📘 GUIDE COMPLET - Interface GTK+/Glade pour Scanner de Bulletins Scolaires
+
+> **Projet:** Dématérialisation des bulletins et relevés de notes
+> **Technologies:** C + GTK+ 3 + Glade + SQLite + Tesseract OCR
+
+---
+
+## 📋 TABLE DES MATIÈRES
+
+1. [Préparation et Installation](#phase-0)
+2. [Fenêtre Principale](#phase-1)
+3. [Dialogue de Scan](#phase-2)
+4. [Dialogue de Création Manuelle](#phase-3)
+5. [Dialogue de Visualisation](#phase-4)
+6. [Intégration Code C](#phase-5)
+7. [Compilation et Tests](#phase-6)
+8. [Checklist Finale](#checklist)
+
+---
+
+## 📦 PHASE 0: PRÉPARATION ET INSTALLATION {#phase-0}
+
+### 0.1 Installer les outils nécessaires
+
+**Ubuntu/Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install glade libgtk-3-dev pkg-config
+```
+
+**Fedora/RedHat:**
+```bash
+sudo dnf install glade gtk3-devel
+```
+
+**Arch Linux:**
+```bash
+sudo pacman -S glade gtk3
+```
+
+### 0.2 Organiser la structure du projet
+
+Crée cette arborescence:
+```
+bulletin_scanner/
+├── src/
+│   ├── main.c              (existant)
+│   ├── bulletin_utils.c    (existant)
+│   ├── database.c          (existant)
+│   ├── ocr_utils.c         (existant)
+│   └── gui.c               (NOUVEAU - à créer)
+├── include/
+│   ├── bulletin.h          (existant)
+│   ├── database.h          (existant)
+│   ├── ocr_utils.h         (existant)
+│   └── gui.h               (NOUVEAU - à créer)
+├── ui/
+│   └── bulletin_app.glade  (NOUVEAU - fichier Glade)
+├── build/
+├── data/
+│   └── bulletins.db
+├── images/
+└── Makefile                (à modifier)
+```
+
+### 0.3 Créer le fichier gui.h
+
+Crée `include/gui.h` qui contiendra:
+
+- Structure `AppWidgets` avec tous les pointeurs vers les widgets GTK
+- Prototypes des fonctions d'initialisation
+- Prototypes des callbacks (fonctions appelées par les signaux)
+- Fonctions utilitaires pour l'interface
+
+**Éléments importants à inclure:**
+- Pointeurs vers tous les widgets principaux (fenêtres, boutons, entrées)
+- Pointeur vers la base de données SQLite
+- Structure temporaire pour stocker l'élève en cours d'édition
+- Variables de statut (ID élève actuel, mode édition, etc.)
+
+---
+
+## 🪟 PHASE 1: FENÊTRE PRINCIPALE {#phase-1}
+
+### 1.1 Lancer Glade et créer le projet
+
+1. Lance Glade depuis le terminal: `glade`
+2. Crée un nouveau projet (File → New)
+3. Va dans "File" → "Save As"
+4. Nomme-le `ui/bulletin_app.glade`
+5. Dans les préférences du projet (Edit → Preferences):
+   - Bibliothèque cible: **GTK+ 3.0**
+   - Langue du projet: Français (optionnel)
+
+### 1.2 Créer la fenêtre principale (GtkWindow)
+
+**Étapes dans Glade:**
+
+1. Dans la palette de gauche (Toplevels), sélectionne **GtkWindow**
+2. Clique dans la zone de travail centrale
+3. Dans le panneau de propriétés à droite:
+
+**Onglet "Général":**
+- **ID du widget**: `main_window`
+- **Titre de la fenêtre**: `Gestion des Bulletins Scolaires`
+- **Largeur par défaut**: `1200`
+- **Hauteur par défaut**: `700`
+- **Position de la fenêtre**: `Center` (GTK_WIN_POS_CENTER)
+- **Redimensionnable**: Coché
+- **Icône par défaut de fenêtre**: Coché
+
+**Onglet "Signaux":**
+- Clique sur "Ajouter un signal"
+- **Signal**: `destroy`
+- **Gestionnaire**: `gtk_main_quit`
+- Ce signal ferme proprement l'application quand on clique sur X
+
+### 1.3 Ajouter le conteneur principal (GtkBox)
+
+**Important:** Une GtkWindow ne peut contenir qu'UN SEUL widget enfant. On utilise donc une GtkBox pour organiser plusieurs éléments verticalement.
+
+1. Sélectionne `main_window` dans l'arbre des widgets (panneau de gauche)
+2. Dans la palette, section "Containers", clique sur **GtkBox**
+3. Dans le dialogue qui apparaît:
+   - **Nombre d'éléments**: `4` (menu, recherche, tableau, statusbar)
+   - Clique OK
+4. Propriétés du GtkBox:
+   - **ID**: `main_vbox` (optionnel, mais bonne pratique)
+   - **Orientation**: `Vertical` (GTK_ORIENTATION_VERTICAL)
+   - **Espacement**: `0`
+   - **Homogène**: Non coché
+
+**Résultat:** Tu as maintenant 4 zones vides empilées verticalement
+
+### 1.4 Créer la barre de menu (GtkMenuBar)
+
+**Dans le premier emplacement du GtkBox (zone 1):**
+
+1. Clique sur le premier emplacement vide marqué "Place holder"
+2. Dans la palette, section "Control and Display", ajoute **GtkMenuBar**
+3. Propriétés du MenuBar:
+   - **ID**: `menubar`
+   - Dans l'onglet "Packing":
+     - **Expand**: `Non` (décoché)
+     - **Fill**: `Oui` (coché)
+     - **Padding**: `0`
+
+**Créer le menu "Fichier":**
+
+1. Clique sur la MenuBar dans la zone de travail
+2. Tu verras apparaître un placeholder pour ajouter un item
+3. Clique dessus et ajoute un **GtkMenuItem**
+4. Propriétés du MenuItem:
+   - **Label**: `_Fichier` 
+     - Le underscore (_) crée un raccourci clavier Alt+F
+   - **Use underline**: Coché
+
+5. Clique sur ce "Fichier" dans la menubar
+6. Un menu déroulant vide apparaît
+7. Ajoute un **GtkMenu** (c'est le conteneur du sous-menu)
+8. Dans ce GtkMenu, tu peux maintenant ajouter des items
+
+**Ajouter les items du menu Fichier:**
+
+**Item 1 - Scanner:**
+- Widget: **GtkMenuItem**
+- **ID**: `menu_scanner`
+- **Label**: `Scanner un bulletin`
+- Icône (optionnel): Tu peux ajouter une image si tu veux
+- **Signal** (onglet Signaux):
+  - Signal: `activate`
+  - Gestionnaire: `on_menu_scanner_activate`
+- **Accélérateur** (raccourci clavier):
+  - Dans Signaux, section Accelerator
+  - Key: `s` (la lettre S)
+  - Modifiers: Coché `Control` (Ctrl)
+  - Résultat: Ctrl+S pour scanner
+
+**Item 2 - Nouveau:**
+- **GtkMenuItem**
+- **ID**: `menu_nouveau`
+- **Label**: `Nouveau bulletin`
+- **Signal**: `activate` → `on_menu_nouveau_activate`
+- **Raccourci**: Ctrl+N
+
+**Séparateur:**
+- Ajoute un **GtkSeparatorMenuItem** (ligne de séparation visuelle)
+
+**Item 3 - Quitter:**
+- **GtkMenuItem**
+- **ID**: `menu_quit`
+- **Label**: `Quitter`
+- **Signal**: `activate` → `on_menu_quit_activate`
+- **Raccourci**: Ctrl+Q
+
+**Créer le menu "Recherche":**
+
+1. Reviens à la MenuBar principale
+2. Clique sur le placeholder à côté de "Fichier"
+3. Ajoute un **GtkMenuItem**: Label `_Recherche`
+4. Ajoute un **GtkMenu** dedans
+5. Ajoute les items suivants:
+
+**Item 1:**
+- **ID**: `menu_recherche`
+- **Label**: `Rechercher un élève`
+- **Signal**: `activate` → `on_menu_recherche_activate`
+- **Raccourci**: Ctrl+F
+
+**Item 2:**
+- **ID**: `menu_voir_tous`
+- **Label**: `Voir tous les élèves`
+- **Signal**: `activate` → `on_menu_voir_tous_activate`
+- **Raccourci**: Ctrl+L
+
+**Créer le menu "Aide":**
+
+1. Ajoute un dernier **GtkMenuItem** sur la MenuBar: Label `_Aide`
+2. Sous-menu avec un item:
+   - **ID**: `menu_about`
+   - **Label**: `À propos`
+   - **Signal**: `activate` → `on_menu_about_activate`
+
+### 1.5 Créer la barre de recherche
+
+**Dans le deuxième emplacement du GtkBox principal (zone 2):**
+
+1. Clique sur le deuxième placeholder
+2. Ajoute un **GtkBox** (conteneur horizontal pour la recherche)
+3. Propriétés de cette GtkBox:
+   - **ID**: `search_box`
+   - **Orientation**: `Horizontal`
+   - **Espacement**: `10` pixels
+   - Dans "Common" ou "Widget":
+     - **Margin left**: `10`
+     - **Margin right**: `10`
+     - **Margin top**: `10`
+     - **Margin bottom**: `10`
+   - Dans Packing:
+     - **Expand**: `Non`
+     - **Fill**: `Oui`
+
+4. Dans le dialogue, mets **2 éléments** (nombre d'items)
+
+**Élément 1 - Barre de recherche:**
+
+1. Premier placeholder de la search_box
+2. Ajoute un **GtkSearchEntry** (c'est une entrée de texte spécialisée pour la recherche)
+3. Propriétés:
+   - **ID**: `search_entry`
+   - **Placeholder text**: `Rechercher par nom, prénom ou matricule...`
+   - **Max width chars**: `50`
+   - Dans Packing:
+     - **Expand**: `Oui` (prend tout l'espace disponible)
+     - **Fill**: `Oui`
+4. Signal:
+   - `search-changed` → `on_search_changed`
+   - Ce signal se déclenche à chaque modification du texte
+
+**Élément 2 - Bouton Actualiser:**
+
+1. Deuxième placeholder
+2. Ajoute un **GtkButton**
+3. Propriétés:
+   - **ID**: `btn_refresh`
+   - **Label**: `Actualiser`
+   - Tu peux ajouter une icône: dans "Button Content", choisis une icône stock
+   - Dans Packing:
+     - **Expand**: `Non`
+     - **Fill**: `Non`
+4. Signal:
+   - `clicked` → `on_btn_refresh_clicked`
+
+### 1.6 Créer le tableau des élèves (GtkTreeView)
+
+**Dans le troisième emplacement (zone 3 - la plus importante):**
+
+Cette zone doit prendre tout l'espace vertical restant pour afficher le tableau.
+
+**Étape 1 - Ajouter le ScrolledWindow:**
+
+1. Clique sur le troisième placeholder
+2. Ajoute un **GtkScrolledWindow**
+   - C'est obligatoire pour avoir des barres de défilement si le tableau est grand
+3. Propriétés:
+   - **ID**: `scrolled_eleves`
+   - **Horizontal policy**: `Automatic` (GTK_POLICY_AUTOMATIC)
+     - Barre de défilement horizontale apparaît si nécessaire
+   - **Vertical policy**: `Automatic`
+   - **Shadow type**: `In` (pour un joli effet visuel)
+   - **Margins**: toutes à `10` pixels
+   - Dans Packing:
+     - **Expand**: `Oui` (TRÈS IMPORTANT - prend tout l'espace)
+     - **Fill**: `Oui`
+
+**Étape 2 - Créer le modèle de données (ListStore):**
+
+Avant de créer le TreeView, il faut créer le modèle qui va contenir les données.
+
+1. Dans le menu de Glade: "Edit" → "Create Store"
+2. Ou clique sur l'icône avec une base de données dans la barre d'outils
+3. Sélectionne **GtkListStore** (pas TreeStore, car nos données sont plates, pas hiérarchiques)
+4. Propriétés du ListStore:
+   - **ID**: `liststore_eleves`
+
+5. **Ajouter les colonnes** (clique sur "Add" pour chaque colonne):
+
+   **Colonne 0 - ID:**
+   - Type: `gint` (entier)
+   - Pour stocker l'ID de l'élève dans la base de données
+   - Cette colonne sera invisible dans le TreeView
+
+   **Colonne 1 - Nom:**
+   - Type: `gchararray` (chaîne de caractères)
+
+   **Colonne 2 - Prénom:**
+   - Type: `gchararray`
+
+   **Colonne 3 - Matricule:**
+   - Type: `gchararray`
+
+   **Colonne 4 - Classe:**
+   - Type: `gchararray`
+
+   **Colonne 5 - Moyenne:**
+   - Type: `gdouble` (nombre décimal)
+
+   **Colonne 6 - Année académique:**
+   - Type: `gchararray`
+
+   **Colonne 7 - Date bulletin:**
+   - Type: `gchararray`
+
+6. Clique OK pour créer le ListStore
+
+**Étape 3 - Créer le TreeView:**
+
+1. Dans le ScrolledWindow, ajoute un **GtkTreeView**
+2. Propriétés:
+   - **ID**: `treeview_eleves`
+   - **Model**: Dans la liste déroulante, sélectionne `liststore_eleves`
+   - **Headers visible**: `Oui` (coché)
+   - **Headers clickable**: `Oui` (pour trier en cliquant sur les en-têtes)
+   - **Enable search**: `Oui` (permet Ctrl+F dans le tableau)
+   - **Reorderable**: `Non` (on ne veut pas que l'utilisateur réorganise)
+3. Signal IMPORTANT:
+   - `row-activated` → `on_treeview_row_activated`
+   - Se déclenche quand on double-clique sur une ligne
+   - C'est ce qui ouvrira la fenêtre de visualisation du bulletin
+
+**Étape 4 - Créer les colonnes du TreeView:**
+
+Le TreeView est créé mais vide. Il faut maintenant définir les colonnes visibles.
+
+Pour chaque colonne ci-dessous, procède ainsi:
+1. Sélectionne le `treeview_eleves`
+2. Clique sur "Add column" (icône + dans la hiérarchie)
+3. Sélectionne **GtkTreeViewColumn**
+
+**COLONNE 1 - Nom:**
+
+Propriétés de la TreeViewColumn:
+- **ID**: `column_nom`
+- **Title**: `Nom`
+- **Resizable**: `Oui` (l'utilisateur peut ajuster la largeur)
+- **Sizing**: `Autosize` ou `Fixed` (selon préférence)
+- **Sort indicator**: `Oui` (affiche une flèche de tri)
+- **Sort column ID**: `1` (correspond à la colonne 1 du ListStore)
+
+Dans cette TreeViewColumn, ajoute un **GtkCellRendererText**:
+- **ID**: `renderer_nom`
+- Dans "Attributes":
+  - Clique sur "Add attribute"
+  - **Attribute**: `text`
+  - **Column**: `1` (colonne du ListStore à afficher)
+
+**COLONNE 2 - Prénom:**
+
+- TreeViewColumn:
+  - **ID**: `column_prenom`
+  - **Title**: `Prénom`
+  - **Sort column ID**: `2`
+- CellRendererText:
+  - **Attribute text** → **Column**: `2`
+
+**COLONNE 3 - Matricule:**
+
+- TreeViewColumn:
+  - **ID**: `column_matricule`
+  - **Title**: `Matricule`
+  - **Sort column ID**: `3`
+- CellRendererText:
+  - **Attribute text** → **Column**: `3`
+
+**COLONNE 4 - Classe:**
+
+- TreeViewColumn:
+  - **ID**: `column_classe`
+  - **Title**: `Classe`
+  - **Sort column ID**: `4`
+- CellRendererText:
+  - **Attribute text** → **Column**: `4`
+
+**COLONNE 5 - Moyenne:**
+
+Cette colonne est spéciale car c'est un nombre avec couleur conditionnelle.
+
+- TreeViewColumn:
+  - **ID**: `column_moyenne`
+  - **Title**: `Moyenne`
+  - **Sort column ID**: `5`
+- CellRendererText:
+  - **ID**: `renderer_moyenne`
+  - **Attribute text** → **Column**: `5`
+  - Tu configureras la couleur dans le code C plus tard
+  - Format: afficher avec 2 décimales (dans le code C)
+
+**COLONNE 6 - Année:**
+
+- TreeViewColumn:
+  - **ID**: `column_annee`
+  - **Title**: `Année Académique`
+  - **Sort column ID**: `6`
+- CellRendererText:
+  - **Attribute text** → **Column**: `6`
+
+**COLONNE 7 - Date:**
+
+- TreeViewColumn:
+  - **ID**: `column_date`
+  - **Title**: `Date Bulletin`
+  - **Sort column ID**: `7`
+- CellRendererText:
+  - **Attribute text** → **Column**: `7`
+
+**Note importante:** La colonne 0 (ID) n'est PAS affichée, elle sert juste pour retrouver l'élève en base de données.
+
+### 1.7 Créer la barre de statut
+
+**Dans le quatrième et dernier emplacement (zone 4 - en bas):**
+
+1. Clique sur le dernier placeholder
+2. Ajoute un **GtkStatusbar**
+3. Propriétés:
+   - **ID**: `statusbar`
+   - Dans Packing:
+     - **Expand**: `Non`
+     - **Fill**: `Oui`
+
+La barre de statut affichera des messages comme:
+- "5 élèves chargés"
+- "Bulletin enregistré avec succès"
+- "Erreur lors du scan"
+- etc.
+
+### 1.8 Sauvegarder le fichier Glade
+
+1. File → Save (Ctrl+S)
+2. Vérifie que c'est bien dans `ui/bulletin_app.glade`
+
+**Vérification:** Tu devrais avoir une fenêtre avec:
+- Une barre de menu en haut
+- Une barre de recherche
+- Un grand tableau (vide pour l'instant)
+- Une barre de statut en bas
+
+---
+
+## 📄 PHASE 2: DIALOGUE DE SCAN {#phase-2}
+
+Ce dialogue s'ouvre quand on clique sur "Scanner un bulletin" dans le menu.
+
+### 2.1 Créer le dialogue
+
+**Dans le même fichier Glade:**
+
+1. Dans la palette, section "Toplevels", ajoute un **GtkDialog**
+2. Tu verras apparaître une nouvelle fenêtre dans la zone de travail
+3. Propriétés:
+   - **ID**: `dialog_scan`
+   - **Title**: `Scanner un Bulletin`
+   - **Width request**: `900`
+   - **Height request**: `700`
+   - **Modal**: `Oui` (coché)
+     - Cela bloque la fenêtre principale tant que ce dialogue est ouvert
+   - **Destroy with parent**: `Oui`
+     - Si on ferme la fenêtre principale, ce dialogue se ferme aussi
+   - **Window position**: `Center on parent`
+
+### 2.2 Configurer les boutons du dialogue
+
+Un GtkDialog a une zone spéciale en bas pour les boutons d'action.
+
+1. Sélectionne `dialog_scan`
+2. Regarde dans la hiérarchie: tu verras "Action Area"
+3. Par défaut, il y a peut-être déjà des boutons
+
+**Configurer les boutons:**
+
+Si des boutons existent déjà, tu peux les modifier. Sinon, ajoute-les.
+
+**Bouton 1 - Annuler:**
+- Widget: **GtkButton**
+- **ID**: `btn_scan_cancel`
+- **Label**: `Annuler`
+- Dans "Button" properties:
+  - **Response ID**: Sélectionne `GTK_RESPONSE_CANCEL` ou entre `-6`
+- Tu peux utiliser un bouton stock: `gtk-cancel`
+
+**Bouton 2 - Enregistrer:**
+- Widget: **GtkButton**
+- **ID**: `btn_scan_save`
+- **Label**: `Enregistrer`
+- **Response ID**: `GTK_RESPONSE_OK` ou `1`
+- **Can default**: `Oui` (c'est le bouton par défaut, activé par Entrée)
+- Tu peux utiliser un bouton stock: `gtk-save`
+- **Sensitive**: Initialement à `Non` (on l'activera après le scan)
+
+### 2.3 Structurer le contenu du dialogue
+
+**La zone "Content Area" du dialogue:**
+
+C'est là qu'on met tout le contenu.
+
+1. Sélectionne la "Content Area" du dialog_scan
+2. Ajoute un **GtkBox** vertical
+3. Propriétés:
+   - **ID**: `scan_content_box`
+   - **Orientation**: `Vertical`
+   - **Espacement**: `15`
+   - **Margins**: toutes à `15`
+4. Nombre d'éléments: `3` (sélection fichier, OCR, formulaire)
+
+### 2.4 Zone de sélection de fichier
+
+**Dans le premier emplacement du scan_content_box:**
+
+1. Ajoute un **GtkBox** horizontal
+2. Nombre d'éléments: `2`
+
+**Élément 1 - FileChooserButton:**
+
+1. Ajoute un **GtkFileChooserButton**
+2. Propriétés:
+   - **ID**: `filechooser_scan`
+   - **Title**: `Sélectionner un bulletin (PDF ou Image)`
+   - **Action**: `Open` (GTK_FILE_CHOOSER_ACTION_OPEN)
+   - **Width chars**: `40`
+   - Dans Packing:
+     - **Expand**: `Oui`
+3. Signal:
+   - `file-set` → `on_filechooser_file_set`
+   - Se déclenche quand l'utilisateur sélectionne un fichier
+
+**Créer les filtres de fichiers:**
+
+Pour que seuls les PDF et images soient sélectionnables:
+
+1. Dans Glade, menu "Edit" → "Add widget from catalog"
+2. Cherche **GtkFileFilter**
+3. Crée deux filtres:
+
+**Filtre 1 - Images:**
+- **ID**: `filter_images`
+- **Name**: `Images (PNG, JPG)`
+- **Patterns**:
+  - Clique sur "Add pattern"
+  - Ajoute: `*.png`
+  - Ajoute: `*.jpg`
+  - Ajoute: `*.jpeg`
+  - Ajoute: `*.PNG`
+  - Ajoute: `*.JPG`
+
+**Filtre 2 - PDF:**
+- **ID**: `filter_pdf`
+- **Name**: `Documents PDF`
+- **Patterns**:
+  - Ajoute: `*.pdf`
+  - Ajoute: `*.PDF`
+
+4. Reviens au `filechooser_scan`
+5. Dans "File Chooser" properties:
+   - Ajoute les deux filtres que tu viens de créer
+
+**Élément 2 - Bouton de scan:**
+
+1. Ajoute un **GtkButton**
+2. Propriétés:
+   - **ID**: `btn_lancer_scan`
+   - **Label**: `Lancer le scan`
+   - Ou utilise une icône: stock `gtk-execute`
+   - Dans Packing:
+     - **Expand**: `Non`
+3. Signal:
+   - `clicked` → `on_btn_lancer_scan_clicked`
+
+### 2.5 Zone de prévisualisation OCR
+
+**Dans le deuxième emplacement du scan_content_box:**
+
+Cette zone montre le texte brut extrait par Tesseract. On la met dans un Expander pour gagner de la place.
+
+1. Ajoute un **GtkExpander**
+2. Propriétés:
+   - **ID**: `expander_ocr`
+   - **Label**: `Texte extrait par OCR (cliquer pour afficher/masquer)`
+   - **Expanded**: `Non` (fermé par défaut)
+   - Dans Packing:
+     - **Expand**: `Non`
+
+**Dans l'Expander:**
+
+1. Ajoute un **GtkScrolledWindow**
+2. Propriétés:
+   - **Height request**: `150` pixels
+   - **Policies**: Automatic pour les deux
+
+3. Dans le ScrolledWindow, ajoute un **GtkTextView**
+4. Propriétés:
+   - **ID**: `textview_ocr`
+   - **Editable**: `Non` (lecture seule)
+   - **Cursor visible**: `Non`
+   - **Wrap mode**: `Word` (retour à la ligne automatique)
+   - **Left margin**: `10`
+   - **Right margin**: `10`
+   - **Monospace**: `Oui` (police à chasse fixe pour le texte brut)
+
+### 2.6 Formulaire éditable (Notebook avec onglets)
+
+**Dans le troisième emplacement (le plus grand):**
+
+1. Ajoute un **GtkNotebook** (système d'onglets)
+2. Propriétés:
+   - **ID**: `notebook_scan`
+   - **Show tabs**: `Oui`
+   - **Show border**: `Oui`
+   - **Scrollable**: `Non`
+   - Dans Packing:
+     - **Expand**: `Oui` (prend tout l'espace restant)
+
+3. Nombre de pages: `2` (Infos perso + Matières)
+
+---
+
+### 2.6.1 ONGLET 1 - Informations Personnelles
+
+**Créer l'onglet:**
+
+1. Sélectionne la première page du Notebook
+2. Dans les propriétés de la page (tab):
+   - **Tab label**: `Informations Personnelles`
+   - **Tab icon**: Optionnel, tu peux mettre une icône
+
+**Contenu de l'onglet:**
+
+1. Dans cette page, ajoute un **GtkBox** vertical
+2. Propriétés:
+   - **Margins**: toutes à `20`
+   - **Espacement**: `15`
+
+3. Dans cette Box, ajoute un **GtkGrid**
+4. Propriétés du Grid:
+   - **ID**: `grid_infos_perso`
+   - **Row spacing**: `10`
+   - **Column spacing**: `15`
+   - **Column homogeneous**: `Non`
+
+**Configuration du Grid (4 colonnes x 4 lignes):**
+
+Le Grid organise les champs en tableau. Configuration:
+- Colonnes 0 et 2: Labels (étroites)
+- Colonnes 1 et 3: Entrées de texte (larges, expand)
+
+**LIGNE 1:**
+
+**Cellule (0,0) - Label Nom:**
+- Widget: **GtkLabel**
+- **Label**: `Nom :`
+- **Xalign**: `1.0` (aligné à droite)
+- **Use markup**: Non
+- Style: Gras (tu peux mettre `<b>Nom :</b>` avec markup)
+
+**Cellule (1,0) - Entry Nom:**
+- Widget: **GtkEntry**
+- **ID**: `entry_nom`
+- **Placeholder text**: `Nom de famille`
+- **Max length**: `100`
+- Dans le Grid:
+  - **Column**: `1`
+  - **Row**: `0`
+  - **Width**: `1` (occupe 1 cellule)
+  - **Expand horizontal**: `Oui`
+
+**Cellule (2,0) - Label Prénom:**
+- Widget: **GtkLabel**
+- **Label**: `Prénom :`
+- **Xalign**: `1.0`
+- Dans le Grid:
+  - **Column**: `2`
+  - **Row**: `0`
+
+**Cellule (3,0) - Entry Prénom:**
+- Widget: **GtkEntry**
+- **ID**: `entry_prenom`
+- **Placeholder text**: `Prénom(s)`
+- Dans le Grid:
+  - **Column**: `3`
+  - **Row**: `0`
+  - **Expand horizontal**: `Oui`
+
+**LIGNE 2:**
+
+**Cellule (0,1) - Label Matricule:**
+- **GtkLabel**: `Matricule :`
+
+**Cellule (1,1) - Entry Matricule:**
+- **GtkEntry**
+- **ID**: `entry_matricule`
+- **Placeholder**: `Matricule étudiant`
+
+**Cellule (2,1) - Label Date Naissance:**
+- **GtkLabel**: `Date de naissance :`
+
+**Cellule (3,1) - Entry Date Naissance:**
+- **GtkEntry**
+- **ID**: `entry_date_naissance`
+- **Placeholder**: `JJ/MM/AAAA`
+- Tu peux aussi utiliser un **GtkCalendar** (plus complexe)
+
+**LIGNE 3:**
+
+**Cellule (0,2) - Label Lieu:**
+- **GtkLabel**: `Lieu de naissance :`
+
+**Cellule (1,2) - Entry Lieu:**
+- **GtkEntry**
+- **ID**: `entry_lieu_naissance`
+
+**Cellule (2,2) - Label Classe:**
+- **GtkLabel**: `Classe/Spécialité :`
+
+**Cellule (3,2) - Entry Classe:**
+- **GtkEntry**
+- **ID**: `entry_classe`
+- **Placeholder**: `Ex: Licence 1 Informatique`
+
+**LIGNE 4:**
+
+**Cellule (0,3) - Label Année:**
+- **GtkLabel**: `Année académique :`
+
+**Cellule (1,3) - Entry Année:**
+- **GtkEntry**
+- **ID**: `entry_annee_academique`
+- **Placeholder**: `2024-2025`
+
+**Cellule (2,3) - Label Niveau:**
+- **GtkLabel**: `Niveau :`
+
+**Cellule (3,3) - Entry Niveau:**
+- **GtkEntry**
+- **ID**: `entry_niveau`
+- **Placeholder**: `Ex: Niveau 1`
+
+---
+
+### 2.6.2 ONGLET 2 - Matières et Notes
+
+**Créer l'onglet:**
+
+1. Sélectionne la deuxième page du Notebook
+2. Propriétés de la page:
+   - **Tab label**: `Matières et Notes`
+
+**Contenu de l'onglet:**
+
+1. Dans cette page, ajoute un **GtkBox** vertical
+2. Propriétés:
+   - **ID**: `box_matieres`
+   - **Margins**: toutes à `10`
+   - **Espacement**: `10`
+3. Nombre d'éléments: `4` (barre outils, tableau, moyenne, message)
+
+---
+
+**ZONE 1 - Barre d'outils (en haut):**
+
+1. Ajoute un **GtkBox** horizontal
+2. Propriétés:
+   - **ID**: `toolbar_matieres`
+   - **Espacement**: `5`
+   - Dans Packing:
+     - **Expand**: `Non`
+
+3. Dans cette Box, ajoute 3 boutons:
+
+**Bouton 1 - Ajouter:**
+- **GtkButton**
+- **ID**: `btn_add_matiere`
+- **Label**: `Ajouter une matière`
+- Ou icône stock: `gtk-add`
+- Signal: `clicked` → `on_btn_add_matiere_clicked`
+
+**Bouton 2 - Supprimer:**
+- **GtkButton**
+- **ID**: `btn_remove_matiere`
+- **Label**: `Supprimer`
+- Ou icône: `gtk-remove`
+- **Sensitive**: `Non` (désactivé au départ)
+- Signal: `clicked` → `on_btn_remove_matiere_clicked`
+
+**Bouton 3 - Recalculer:**
+- **GtkButton**
+- **ID**: `btn_recalc_moyenne`
+- **Label**: `Recalculer la moyenne`
+- Ou icône: `gtk-refresh`
+- Signal: `clicked` → `on_btn_recalc_clicked`
+
+---
+
+**ZONE 2 - Tableau des matières (zone principale):**
+
+1. Ajoute un **GtkScrolledWindow**
+2. Propriétés:
+   - **ID**: `scrolled_matieres`
+   - **Policies**: Automatic
+   - Dans Packing:
+     - **Expand**: `Oui` (prend tout l'espace)
+
+**Créer le ListStore pour les matières:**
+
+1. Menu Edit → Create Store → **GtkListStore**
+2. **ID**: `liststore_matieres_scan`
+3. **Colonnes** (8 colonnes):
+   - Col 0: `gchararray` (Nom complet de la matière)
+   - Col 1: `gchararray` (Code matière ex: CP31L1101)
+   - Col 2: `gdouble` (Note)
+   - Col 3: `gdouble` (Coefficient)
+   - Col 4: `gchararray` (Appréciation)
+   - Col 5: `gint` (Semestre: 1 ou 2)
+   - Col 6: `gchararray` (Type: CP ou MCP)
+   - Col 7: `gboolean` (Validée ou non)
+
+**Créer le TreeView:**
+
+1. Dans le ScrolledWindow, ajoute un **GtkTreeView**
+2. Propriétés:
+   - **ID**: `treeview_matieres_scan`
+   - **Model**: `liststore_matieres_scan`
+   - **Headers visible**: `Oui`
+   - **Enable grid lines**: `Horizontal` (pour voir les lignes)
+   - **Enable search**: `Oui`
+3. Signal:
+   - `cursor-changed` → `on_matiere_selection_changed`
+   - Pour activer/désactiver le bouton Supprimer
+
+**Créer les colonnes du TreeView des matières:**
+
+Pour chaque colonne, ajoute une **GtkTreeViewColumn** et son **CellRenderer** associé.
+
+**COLONNE 1 - Nom Matière:**
+- **TreeViewColumn**:
+  - **ID**: `column_nom_matiere`
+  - **Title**: `Matière`
+  - **Resizable**: `Oui`
+  - **Expand**: `Oui`
+  - **Min width**: `300`
+- **CellRendererText**:
+  - **ID**: `renderer_nom_matiere`
+  - **Editable**: `Oui` (important!)
+  - **Attribute text**: Column `0`
+  - Signal:
+    - `edited` → `on_matiere_nom_edited`
+
+**COLONNE 2 - Code:**
+- **TreeViewColumn**:
+  - **Title**: `Code`
+  - **Width**: `120`
+- **CellRendererText**:
+  - **ID**: `renderer_code`
+  - **Editable**: `Oui`
+  - **Attribute text**: Column `1`
+  - Signal: `edited` → `on_matiere_code_edited`
+
+**COLONNE 3 - Note:**
+- **TreeViewColumn**:
+  - **Title**: `Note (/20)`
+  - **Width**: `80`
+- **CellRendererSpin** (pour les nombres avec flèches):
+  - **ID**: `renderer_note`
+  - **Editable**: `Oui`
+  - **Attribute text**: Column `2`
+  - **Adjustment**: (tu dois créer un GtkAdjustment)
+    - Value: `10.0`
+    - Lower: `0.0`
+    - Upper: `20.0`
+    - Step increment: `0.25`
+    - Page increment: `1.0`
+  - **Digits**: `2` (2 décimales)
+  - Signal: `edited` → `on_matiere_note_edited`
+
+**COLONNE 4 - Coefficient:**
+- **TreeViewColumn**:
+  - **Title**: `Coefficient`
+  - **Width**: `80`
+- **CellRendererSpin**:
+  - **ID**: `renderer_coef`
+  - **Editable**: `Oui`
+  - **Attribute text**: Column `3`
+  - **Adjustment**:
+    - Lower: `0.5`
+    - Upper: `15.0`
+    - Step: `0.5`
+  - **Digits**: `1`
+  - Signal: `edited` → `on_matiere_coef_edited`
+
+**COLONNE 5 - Appréciation:**
+- **TreeViewColumn**:
+  - **Title**: `Appréciation`
+  - **Width**: `150`
+- **CellRendererText**:
+  - **ID**: `renderer_appreciation`
+  - **Editable**: `Oui`
+  - **Attribute text**: Column `4`
+  - Signal: `edited` → `on_matiere_appreciation_edited`
+
+**COLONNE 6 - Semestre:**
+- **TreeViewColumn**:
+  - **Title**: `Sem.`
+  - **Width**: `50`
+- **CellRendererText**:
+  - **ID**: `renderer_semestre`
+  - **Attribute text**: Column `5`
+  - **Xalign**: `0.5` (centré)
+
+**COLONNE 7 - Validée:**
+- **TreeViewColumn**:
+  - **Title**: `Validée`
+  - **Width**: `70`
+- **CellRendererToggle** (case à cocher):
+  - **ID**: `renderer_validee`
+  - **Activatable**: `Oui`
+  - **Attribute active**: Column `7`
+  - Signal: `toggled` → `on_matiere_validee_toggled`
+
+---
+
+**ZONE 3 - Affichage de la moyenne:**
+
+1. Ajoute un **GtkBox** horizontal
+2. Propriétés:
+   - **Halign**: `Center` (centré horizontalement)
+   - **Margins**: top et bottom à `15`
+   - Dans Packing:
+     - **Expand**: `Non`
+
+3. Dans cette Box, ajoute 2 labels:
+
+**Label 1:**
+- **GtkLabel**
+- **Label**: `Moyenne Générale :`
+- **Use markup**: Oui
+- **Text**: `<b>Moyenne Générale :</b>`
+
+**Label 2:**
+- **GtkLabel**
+- **ID**: `label_moyenne_scan`
+- **Label**: `0.00 / 20`
+- **Use markup**: Oui
+- **Text**: `<span size="x-large" weight="bold">0.00 / 20</span>`
+- Tu changeras la couleur dans le code C selon la moyenne
+
+---
+
+**ZONE 4 - Message d'aide:**
+
+1. Ajoute un **GtkLabel**
+2. Propriétés:
+   - **ID**: `label_info_matieres`
+   - **Label**: `💡 Double-cliquez sur une cellule pour la modifier`
+   - **Use markup**: Oui
+   - **Xalign**: `0.5` (centré)
+   - Style: Italique et gris
+   - Dans Packing:
+     - **Expand**: `Non`
+
+---
+
+### 2.7 Dialogue d'ajout de matière
+
+Ce petit dialogue s'ouvre quand on clique sur "Ajouter une matière".
+
+**Créer le dialogue:**
+
+1. Dans Glade, ajoute un nouveau **GtkDialog**
+2. Propriétés:
+   - **ID**: `dialog_add_matiere`
+   - **Title**: `Ajouter une Matière`
+   - **Width**: `450`
+   - **Height**: `400`
+   - **Modal**: `Oui`
+   - **Destroy with parent**: `Oui`
+
+**Boutons du dialogue:**
+
+- Bouton "Annuler": Response ID = GTK_RESPONSE_CANCEL
+- Bouton "Ajouter": Response ID = GTK_RESPONSE_OK
+
+**Contenu:**
+
+1. Dans la Content Area, ajoute un **GtkBox** vertical
+2. Margins: `20`, Espacement: `15`
+
+3. Dans cette Box, ajoute un **GtkGrid**
+4. Propriétés:
+   - **Row spacing**: `12`
+   - **Column spacing**: `10`
+   - **Column homogeneous**: `Non`
+
+**Ligne 1 - Semestre:**
+- Label (0,0): `Semestre :`
+- **GtkComboBoxText** (1,0):
+  - **ID**: `combo_semestre`
+  - **Active**: `0` (premier élément sélectionné)
+  - Items à ajouter:
+    1. `Semestre 1`
+    2. `Semestre 2`
+
+**Ligne 2 - Type:**
+- Label (0,1): `Type :`
+- **GtkComboBoxText** (1,1):
+  - **ID**: `combo_type_matiere`
+  - Items:
+    1. `CP - Cours Principal`
+    2. `MCP - Module de Cours Principal`
+
+**Ligne 3 - Code:**
+- Label (0,2): `Code matière :`
+- **GtkEntry** (1,2):
+  - **ID**: `entry_code_matiere`
+  - **Placeholder**: `Ex: CP31L1101`
+  - **Max length**: `20`
+
+**Ligne 4 - Nom:**
+- Label (0,3): `Nom de la matière :`
+- **GtkEntry** (1,3):
+  - **ID**: `entry_nom_matiere_add`
+  - **Placeholder**: `Ex: Algèbre 1A`
+
+**Ligne 5 - Note:**
+- Label (0,4): `Note (/20) :`
+- **GtkSpinButton** (1,4):
+  - **ID**: `spin_note`
+  - **Adjustment**:
+    - Value: `10.0`
+    - Lower: `0.0`
+    - Upper: `20.0`
+    - Step: `0.25`
+  - **Digits**: `2`
+  - **Numeric**: `Oui`
+
+**Ligne 6 - Coefficient:**
+- Label (0,5): `Coefficient :`
+- **GtkSpinButton** (1,5):
+  - **ID**: `spin_coefficient`
+  - **Adjustment**:
+    - Value: `1.0`
+    - Lower: `0.5`
+    - Upper: `15.0`
+    - Step: `0.5`
+  - **Digits**: `1`
+
+**Ligne 7 - Module parent (optionnel):**
+- Label (0,6): `Module parent :`
+- **GtkEntry** (1,6):
+  - **ID**: `entry_module_parent`
+  - **Placeholder**: `Ex: MCP31L1101 (optionnel)`
+
+**Ligne 8 - Validée:**
+- Label vide (0,7):
+- **GtkCheckButton** (1,7):
+  - **ID**: `check_matiere_validee`
+  - **Label**: `Matière validée`
+
+---
+
+### 2.8 Sauvegarder
+
+File → Save (Ctrl+S)
+
+**Vérification:** Tu devrais maintenant avoir:
+- La fenêtre principale
+- Le dialogue de scan avec 2 onglets
+- Le dialogue d'ajout de matière
+
+---
+
+## ✍️ PHASE 3: DIALOGUE DE CRÉATION MANUELLE {#phase-3}
+
+Ce dialogue est presque identique au dialogue de scan, mais SANS la partie OCR.
+
+### 3.1 Option 1 - Dupliquer le dialogue scan
+
+**Méthode rapide dans Glade:**
+
+1. Sélectionne `dialog_scan` dans la hiérarchie
+2. Clic droit → "Copy" (ou Ctrl+C)
+3. Clic droit sur une zone vide → "Paste" (ou Ctrl+V)
+4. Un nouveau dialogue identique est créé
+5. Renomme-le:
+   - **ID**: `dialog_create`
+   - **Title**: `Créer un Nouveau Bulletin`
+
+**Modifications à faire:**
+
+1. Supprime complètement la zone FileChooser (la Box avec le bouton de sélection de fichier)
+2. Supprime l'Expander avec le TextView OCR
+3. Renomme les IDs des widgets pour éviter les conflits:
+   - `notebook_scan` → `notebook_create`
+   - Tous les `entry_xxx` → ajoute un suffixe `_create`
+   - `treeview_matieres_scan` → `treeview_matieres_create`
+   - `liststore_matieres_scan` → `liststore_matieres_create`
+   - `label_moyenne_scan` → `label_moyenne_create`
+
+### 3.2 Option 2 - Créer from scratch
+
+Si tu préfères créer de zéro (même structure que scan mais plus simple):
+
+**Créer le dialogue:**
+- **GtkDialog**
+- **ID**: `dialog_create`
+- **Title**: `Créer un Nouveau Bulletin`
+- Même taille que dialog_scan
+
+**Contenu:**
+- Même Notebook avec 2 onglets
+- Onglet 1: Même Grid avec les infos personnelles
+- Onglet 2: Même zone de matières
+
+**Important:** Tous les champs sont VIDES au départ, contrairement au scan où ils sont pré-remplis par l'OCR.
+
+---
+
+## 👁️ PHASE 4: DIALOGUE DE VISUALISATION/MODIFICATION {#phase-4}
+
+Ce dialogue s'ouvre quand on double-clique sur un élève dans le tableau principal.
+
+### 4.1 Créer le dialogue
+
+1. Ajoute un nouveau **GtkDialog**
+2. Propriétés:
+   - **ID**: `dialog_view`
+   - **Title**: `Bulletin Scolaire` (sera changé dynamiquement)
+   - **Width**: `1000`
+   - **Height**: `800`
+   - **Modal**: `Oui`
+
+**Boutons du dialogue:**
+
+Cette fois, on ne veut PAS les boutons standards. On va créer nos propres boutons.
+
+1. Dans l'Action Area, supprime les boutons par défaut
+2. On créera une barre d'outils personnalisée dans le content area
+
+### 4.2 Structure du contenu
+
+**Dans la Content Area:**
+
+1. Ajoute un **GtkBox** vertical
+2. **ID**: `view_main_box`
+3. Nombre d'éléments: `3` (barre actions, contenu, bouton fermer)
+
+---
+
+**ZONE 1 - Barre d'actions (en haut):**
+
+1. Ajoute un **GtkBox** horizontal
+2. Propriétés:
+   - **ID**: `view_toolbar`
+   - **Espacement**: `10`
+   - **Margins**: toutes à `10`
+   - Dans Packing: **Expand**: `Non`
+
+3. Ajoute 4 boutons dans cette barre:
+
+**Bouton 1 - Modifier:**
+- **GtkButton**
+- **ID**: `btn_edit_bulletin`
+- **Label**: `Modifier`
+- Icône: `gtk-edit`
+- Signal: `clicked` → `on_btn_edit_clicked`
+
+**Bouton 2 - Enregistrer:**
+- **GtkButton**
+- **ID**: `btn_save_bulletin`
+- **Label**: `Enregistrer`
+- Icône: `gtk-save`
+- **Sensitive**: `Non` (désactivé au départ)
+- **Visible**: `Non` (caché au départ)
+- Signal: `clicked` → `on_btn_save_clicked`
+
+**Bouton 3 - Supprimer:**
+- **GtkButton**
+- **ID**: `btn_delete_bulletin`
+- **Label**: `Supprimer`
+- Icône: `gtk-delete`
+- Signal: `clicked` → `on_btn_delete_clicked`
+
+**Bouton 4 - Exporter PDF:**
+- **GtkButton**
+- **ID**: `btn_export_pdf`
+- **Label**: `Exporter en PDF`
+- Icône: `gtk-print` ou `gtk-save-as`
+- Signal: `clicked` → `on_btn_export_pdf_clicked`
+
+---
+
+**ZONE 2 - Contenu du bulletin (scrollable):**
+
+1. Ajoute un **GtkScrolledWindow**
+2. Propriétés:
+   - **Policies**: Automatic
+   - Dans Packing: **Expand**: `Oui`
+
+3. Dans le ScrolledWindow, ajoute un **GtkBox** vertical
+4. Propriétés:
+   - **ID**: `view_content_box`
+   - **Margins**: toutes à `20`
+   - **Espacement**: `20`
+
+**Cette Box contiendra 4 sections:**
+
+---
+
+### 4.2.1 Section 1 - En-tête du bulletin
+
+Dans `view_content_box`, ajoute:
+
+1. **GtkBox** vertical
+2. **Halign**: `Center`
+
+Dans cette Box:
+
+**Titre:**
+- **GtkLabel**
+- **ID**: `label_bulletin_header`
+- **Label**: `<span size="xx-large" weight="bold">BULLETIN SCOLAIRE</span>`
+- **Use markup**: `Oui`
+- **Justify**: `Center`
+
+**Séparateur:**
+- **GtkSeparator**
+- **Orientation**: `Horizontal`
+- **Margin top/bottom**: `10`
+
+**Sous-titre:**
+- **GtkLabel**
+- **ID**: `label_etablissement`
+- **Label**: `Votre Établissement - Année 2024-2025`
+- **Use markup**: Oui
+- Texte en italique
+
+---
+
+### 4.2.2 Section 2 - Informations de l'élève
+
+1. Ajoute un **GtkFrame**
+2. Propriétés:
+   - **Label**: `Informations Personnelles`
+   - **Label xalign**: `0.0`
+   - **Shadow type**: `In`
+
+3. Dans le Frame, ajoute un **GtkGrid**
+4. Propriétés:
+   - **ID**: `grid_view_infos`
+   - **Row spacing**: `10`
+   - **Column spacing**: `15`
+   - **Margins**: toutes à `15`
+   - **Row homogeneous**: `Oui`
+
+**Configuration du Grid (4 colonnes):**
+
+Le Grid affiche les infos en mode lecture seule (Labels), mais pourra passer en mode édition (Entries).
+
+Pour chaque information, crée une paire Label + Label (ou Label + Entry en mode édition).
+
+**Structure recommandée (8 lignes x 4 colonnes):**
+
+**Ligne 0:**
+- (0,0) Label: `<b>Nom :</b>`
+- (1,0) **GtkLabel** ID: `label_view_nom`
+- (2,0) Label: `<b>Prénom :</b>`
+- (3,0) **GtkLabel** ID: `label_view_prenom`
+
+**Ligne 1:**
+- (0,1) Label: `<b>Matricule :</b>`
+- (1,1) **GtkLabel** ID: `label_view_matricule`
+- (2,1) Label: `<b>Date naissance :</b>`
+- (3,1) **GtkLabel** ID: `label_view_date_naissance`
+
+**Ligne 2:**
+- (0,2) Label: `<b>Lieu naissance :</b>`
+- (1,2) **GtkLabel** ID: `label_view_lieu`
+- (2,2) Label: `<b>Classe :</b>`
+- (3,2) **GtkLabel** ID: `label_view_classe`
+
+**Ligne 3:**
+- (0,3) Label: `<b>Année académique :</b>`
+- (1,3) **GtkLabel** ID: `label_view_annee`
+- (2,3) Label: `<b>Date bulletin :</b>`
+- (3,3) **GtkLabel** ID: `label_view_date_bulletin`
+
+**Astuce:** Pour tous les labels de valeurs (label_view_xxx):
+- **Xalign**: `0.0` (alignés à gauche)
+- **Selectable**: `Oui` (pour copier le texte)
+- **Wrap**: `Oui` (retour à la ligne si texte long)
+
+---
+
+### 4.2.3 Section 3 - Notes par semestre
+
+1. Ajoute un **GtkFrame**
+2. **Label**: `Matières et Notes`
+
+3. Dans le Frame, ajoute un **GtkNotebook**
+4. Propriétés:
+   - **ID**: `notebook_view_semestres`
+   - **Show tabs**: `Oui`
+   - **Show border**: `Non`
+   - **Scrollable**: `Oui`
+
+**Créer 3 onglets:**
+
+---
+
+**ONGLET 1 - Semestre 1:**
+
+1. Page du Notebook
+2. **Tab label**: `Semestre 1`
+
+3. Dans la page, **GtkBox** vertical
+
+**Contenu:**
+
+A) **GtkScrolledWindow** avec **GtkTreeView**:
+- **ID**: `treeview_view_s1`
+- **Model**: Crée un nouveau ListStore
+  - **ID**: `liststore_view_s1`
+  - Même structure que liststore_matieres_scan
+- Colonnes identiques aux matières (mais non éditables)
+- **Headers visible**: `Oui`
+- **Enable grid lines**: `Horizontal and Vertical`
+
+B) **GtkBox** horizontal pour stats S1:
+- **Margins**: `15`
+- **Espacement**: `20`
+- **Halign**: `Center`
+
+Dans cette Box, 3 GtkLabel:
+- **ID**: `label_stats_s1_total`
+  - **Label**: `Total: 0 matières`
+- **ID**: `label_stats_s1_validees`
+  - **Label**: `Validées: 0`
+- **ID**: `label_stats_s1_moyenne`
+  - **Label**: `Moyenne S1: 0.00`
+  - Texte en gras et grande taille
+
+---
+
+**ONGLET 2 - Semestre 2:**
+
+Structure identique à l'onglet S1:
+- **Tab label**: `Semestre 2`
+- **GtkTreeView** ID: `treeview_view_s2`
+- **ListStore** ID: `liststore_view_s2`
+- Labels de stats S2
+
+---
+
+**ONGLET 3 - Récapitulatif Annuel:**
+
+1. **Tab label**: `Récapitulatif Annuel`
+
+2. Dans la page, **GtkBox** vertical
+3. **Margins**: `30`, **Espacement**: `25`
+
+**Contenu:**
+
+A) **GtkGrid** pour statistiques globales:
+- **Row spacing**: `15`
+- **Column spacing**: `20`
+- **Halign**: `Center`
+
+Affiche des infos comme:
+- Ligne 0: `Total matières année` + valeur
+- Ligne 1: `Matières validées` + valeur
+- Ligne 2: `Taux de réussite` + pourcentage
+- Ligne 3: `Crédits obtenus` + valeur
+
+B) **GtkSeparator**
+
+C) **GtkBox** vertical pour la moyenne générale:
+- **Halign**: `Center`
+- **Margins**: `20`
+
+Contenu:
+- **GtkLabel**: `Moyenne Générale Annuelle`
+- **GtkLabel** ID: `label_view_moyenne_generale`
+  - **Label**: `0.00 / 20`
+  - **Use markup**: Oui
+  - Taille: `xx-large`
+  - Poids: `bold`
+  - La couleur sera définie dans le code C
+
+D) **GtkLabel** ID: `label_view_appreciation`
+- **Label**: `Appréciation: Très Bien`
+- **Use markup**: Oui
+- **Justify**: `Center`
+
+---
+
+### 4.2.4 Section 4 - Bouton de fermeture
+
+**En bas du view_content_box:**
+
+1. **GtkBox** horizontal
+2. **Halign**: `Center`
+3. **Margin top**: `20`
+
+Dans cette Box:
+- **GtkButton**
+- **ID**: `btn_close_view`
+- **Label**: `Fermer`
+- Icône: `gtk-close`
+- **Width request**: `150`
+- Signal: `clicked` → `on_btn_close_view_clicked`
+
+---
+
+### 4.3 Sauvegarder
+
+File → Save
+
+**Vérification finale:** Tu devrais avoir 4 dialogues/fenêtres:
+1. `main_window` - Fenêtre principale
+2. `dialog_scan` - Scanner un bulletin
+3. `dialog_create` - Créer un bulletin
+4. `dialog_view` - Visualiser un bulletin
+5. `dialog_add_matiere` - Ajouter une matière (petit dialogue)
+
+---
+
+## 🔧 PHASE 5: INTÉGRATION AVEC LE CODE C {#phase-5}
+
+Maintenant que l'interface Glade est complète, il faut la connecter au code C.
+
+### 5.1 Modifier le Makefile
+
+Ajoute les flags GTK+ à ton Makefile existant:
+
+```makefile
+# Ajoute cette ligne au début
+GTK_FLAGS = `pkg-config --cflags --libs gtk+-3.0`
+
+# Modifie la ligne LIBS
+LIBS = -lsqlite3 -ltesseract -llept $(GTK_FLAGS)
+
+# Ajoute gui.c aux sources
+SOURCES = $(SRC_DIR)/main.c $(SRC_DIR)/bulletin_utils.c \
+          $(SRC_DIR)/database.c $(SRC_DIR)/ocr_utils.c \
+          $(SRC_DIR)/gui.c
+```
+
+### 5.2 Structure du fichier gui.c
+
+Crée `src/gui.c` avec cette structure générale:
+
+**Sections à inclure:**
+
+1. **Includes et structure:**
+   - Includes nécessaires
+   - Définition de la structure AppWidgets (si pas dans .h)
+
+2. **Fonction d'initialisation:**
+   - `init_gui()` - Initialise GTK
+   - `load_interface()` - Charge le fichier .glade
+   - `connect_signals()` - Connecte tous les signaux manuellement
+   - `setup_treeviews()` - Configure les TreeViews
+
+3. **Callbacks fenêtre principale:**
+   - Toutes les fonctions `on_xxx` déclarées dans Glade
+   - Gestion des clics menu
+   - Recherche
+   - Sélection dans tableau
+
+4. **Callbacks dialogue scan:**
+   - Sélection fichier
+   - Lancement OCR
+   - Édition cellules
+   - Ajout/suppression matières
+
+5. **Callbacks dialogue création:**
+   - Similaires au scan
+
+6. **Callbacks dialogue visualisation:**
+   - Basculer mode édition/lecture
+   - Enregistrer modifications
+   - Supprimer
+   - Exporter PDF
+
+7. **Fonctions utilitaires:**
+   - `charger_liste_eleves()` - Remplit le TreeView principal
+   - `calculer_moyenne_gui()` - Recalcule et affiche la moyenne
+   - `afficher_message()` - Messages dans la statusbar
+   - `afficher_erreur()` - Dialogue d'erreur
+   - `confirmer_action()` - Dialogue de confirmation
+
+### 5.3 Charger le fichier Glade
+
+**Dans `load_interface()`:**
+
+Utilise GtkBuilder pour charger le fichier .glade:
+
+```c
+// Pseudocode - structure générale
+GtkBuilder *builder = gtk_builder_new();
+// Charger le fichier
+gtk_builder_add_from_file(builder, "ui/bulletin_app.glade", &error);
+
+// Récupérer tous les widgets
+app->main_window = GTK_WIDGET(gtk_builder_get_object(builder, "main_window"));
+app->treeview_eleves = GTK_WIDGET(gtk_builder_get_object(builder, "treeview_eleves"));
+// ... récupérer TOUS les widgets définis dans Glade
+```
+
+### 5.4 Connecter les signaux
+
+**Dans `connect_signals()`:**
+
+Tu as 2 options:
+
+**Option 1 - Connexion automatique (recommandé):**
+```c
+// Dans le fichier Glade, tu as défini les noms des handlers
+// GtkBuilder peut les connecter automatiquement
+gtk_builder_connect_signals(builder, app);
+```
+
+**Option 2 - Connexion manuelle:**
+```c
+// Connecter signal par signal
+g_signal_connect(app->btn_refresh, "clicked", 
+                 G_CALLBACK(on_btn_refresh_clicked), app);
+g_signal_connect(app->search_entry, "search-changed",
+                 G_CALLBACK(on_search_changed), app);
+// ... etc pour tous les signaux
+```
+
+### 5.5 Remplir le TreeView principal avec les données
+
+**Fonction `charger_liste_eleves()`:**
+
+Cette fonction récupère tous les élèves de la base et les affiche dans le tableau.
+
+**Étapes:**
+1. Vider le ListStore actuel
+2. Requête SQL pour récupérer tous les élèves
+3. Pour chaque élève:
+   - Créer un GtkTreeIter
+   - Ajouter une ligne au ListStore avec gtk_list_store_append()
+   - Remplir les colonnes avec gtk_list_store_set()
+4. Mettre à jour la statusbar avec le nombre d'élèves
+
+### 5.6 Gérer le dialogue de scan
+
+**Workflow complet:**
+
+1. **Utilisateur clique "Scanner" dans le menu**
+   - `on_menu_scanner_activate()` est appelé
+   - Affiche `dialog_scan` avec gtk_dialog_run()
+
+2. **Utilisateur sélectionne un fichier**
+   - `on_filechooser_file_set()` est appelé
+   - Récupère le chemin du fichier
+   - Active le bouton "Lancer le scan"
+
+3. **Utilisateur clique "Lancer le scan"**
+   - `on_btn_lancer_scan_clicked()` est appelé
+   - Appelle `extraire_texte_image()` (ton code existant)
+   - Affiche le texte brut dans `textview_ocr`
+   - Appelle `analyser_bulletin_texte()` (ton code existant)
+   - Remplit les Entry avec les infos extraites
+   - Remplit le TreeView des matières
+   - Active le bouton "Enregistrer"
+
+4. **Utilisateur corrige les erreurs**
+   - Modifie les Entry directement
+   - Double-clique sur les cellules du TreeView
+   - Les callbacks `on_cell_edited()` sont appelés
+   - Recalcule la moyenne automatiquement
+
+5. **Utilisateur clique "Enregistrer"**
+   - Le dialogue retourne GTK_RESPONSE_OK
+   - Récupère toutes les données des widgets
+   - Crée une structure Eleve
+   - Appelle `inserer_eleve()` (ton code existant)
+   - Ferme le dialogue
+   - Actualise le tableau principal
+
+### 5.7 Gérer l'édition des cellules
+
+**Pour les CellRendererText éditables:**
+
+```c
+// Pseudocode du callback
+void on_matiere_nom_edited(GtkCellRendererText *renderer,
+                           gchar *path,
+                           gchar *new_text,
+                           AppWidgets *app) {
+    GtkTreeIter iter;
+    GtkTreeModel *model = GTK_TREE_MODEL(app->liststore_matieres_scan);
+    
+    // Récupérer l'itérateur de la ligne modifiée
+    gtk_tree_model_get_iter_from_string(model, &iter, path);
+    
+    // Mettre à jour la valeur dans le modèle
+    gtk_list_store_set(app->liststore_matieres_scan, &iter,
+                       0, new_text,  // Colonne 0 = nom matière
+                       -1);
+    
+    // Recalculer la moyenne si nécessaire
+    calculer_moyenne_gui(app);
+}
+```
+
+### 5.8 Calculer et afficher la moyenne
+
+**Fonction `calculer_moyenne_gui()`:**
+
+**Étapes:**
+1. Parcourir toutes les lignes du ListStore des matières
+2. Pour chaque ligne:
+   - Récupérer la note (colonne 2)
+   - Récupérer le coefficient (colonne 3)
+   - Récupérer le type (colonne 6) - ignorer les MCP
+3. Calculer: somme_notes_pondérées / somme_coefficients
+4. Mettre à jour le label_moyenne avec la nouvelle valeur
+5. Changer la couleur selon la note:
+   - Rouge si < 10
+   - Orange si 10-12
+   - Jaune si 12-14
+   - Vert si >= 14
+
+**Exemple de changement de couleur:**
+```c
+// Pseudocode
+if (moyenne >= 14.0) {
+    sprintf(markup, "<span size=\"x-large\" weight=\"bold\" foreground=\"green\">%.2f / 20</span>", moyenne);
+} else if (moyenne >= 10.0) {
+    sprintf(markup, "<span size=\"x-large\" weight=\"bold\" foreground=\"orange\">%.2f / 20</span>", moyenne);
+} else {
+    sprintf(markup, "<span size=\"x-large\" weight=\"bold\" foreground=\"red\">%.2f / 20</span>", moyenne);
+}
+gtk_label_set_markup(GTK_LABEL(app->label_moyenne_scan), markup);
+```
+
+### 5.9 Gérer l'ajout de matière
+
+**Workflow:**
+
+1. **Utilisateur clique "Ajouter une matière"**
+   - `on_btn_add_matiere_clicked()` appelé
+   - Vide tous les champs du `dialog_add_matiere`
+   - Affiche le dialogue avec gtk_dialog_run()
+
+2. **Utilisateur remplit le formulaire**
+   - Entre le code, nom, note, coefficient, etc.
+
+3. **Utilisateur clique "Ajouter"**
+   - Dialogue retourne GTK_RESPONSE_OK
+   - Récupère les valeurs de tous les widgets
+   - Construit le nom complet de la matière:
+     - Format: `[S1-CP|MCP31L1101] CP31L1105 - Algèbre 1A`
+   - Ajoute une nouvelle ligne au ListStore
+   - Recalcule la moyenne
+   - Ferme le dialogue
+
+### 5.10 Gérer la suppression de matière
+
+**Workflow:**
+
+1. **Utilisateur sélectionne une ligne dans le TreeView**
+   - `on_matiere_selection_changed()` appelé
+   - Active le bouton "Supprimer"
+
+2. **Utilisateur clique "Supprimer"**
+   - `on_btn_remove_matiere_clicked()` appelé
+   - Récupère la sélection actuelle
+   - Affiche un dialogue de confirmation
+   - Si confirmé:
+     - Supprime la ligne du ListStore
+     - Recalcule la moyenne
+     - Désactive le bouton "Supprimer"
+
+### 5.11 Gérer la visualisation/modification
+
+**Workflow d'ouverture:**
+
+1. **Utilisateur double-clique sur un élève**
+   - `on_treeview_row_activated()` appelé
+   - Récupère l'ID de l'élève (colonne 0 invisible)
+   - Appelle `recuperer_eleve(db, id)` (ton code existant)
+   - Remplit tous les labels du `dialog_view` avec les données
+   - Remplit les 2 TreeView (S1 et S2) avec les matières
+   - Calcule et affiche les statistiques
+   - Affiche le dialogue
+
+**Mode lecture (par défaut):**
+- Tous les champs sont des GtkLabel (non modifiables)
+- Bouton "Enregistrer" invisible
+- Bouton "Modifier" visible
+
+**Basculer en mode édition:**
+
+1. **Utilisateur clique "Modifier"**
+   - `on_btn_edit_clicked()` appelé
+   - Pour chaque GtkLabel d'info:
+     - Cache le Label
+     - Crée un GtkEntry à la place
+     - Remplit l'Entry avec la valeur du Label
+   - Rend les cellules des TreeView éditables
+   - Cache le bouton "Modifier"
+   - Affiche le bouton "Enregistrer"
+
+2. **Utilisateur modifie les valeurs**
+   - Tape directement dans les Entry
+   - Modifie les cellules du TreeView
+
+3. **Utilisateur clique "Enregistrer"**
+   - `on_btn_save_clicked()` appelé
+   - Récupère toutes les valeurs des Entry
+   - Récupère toutes les lignes des TreeView
+   - Crée une structure Eleve
+   - Appelle `update_eleve(db, id, eleve)` (à créer dans database.c)
+   - Repasse en mode lecture
+   - Actualise le tableau principal
+
+### 5.12 Gérer la suppression d'un bulletin
+
+**Workflow:**
+
+1. **Utilisateur clique "Supprimer"**
+   - `on_btn_delete_clicked()` appelé
+   - Affiche un GtkMessageDialog de confirmation:
+     - Type: GTK_MESSAGE_WARNING
+     - Buttons: GTK_BUTTONS_YES_NO
+     - Message: "Êtes-vous sûr de vouloir supprimer ce bulletin ?"
+
+2. **Si confirmé:**
+   - Appelle `delete_eleve(db, id)` (à créer dans database.c)
+   - Ferme le dialogue de visualisation
+   - Actualise le tableau principal
+   - Affiche un message de succès dans la statusbar
+
+### 5.13 Gérer la recherche
+
+**Dans `on_search_changed()`:**
+
+**Étapes:**
+1. Récupérer le texte de la GtkSearchEntry
+2. Si le texte est vide:
+   - Réafficher tous les élèves
+3. Sinon:
+   - Filtrer le ListStore pour ne montrer que les élèves correspondants
+   - La recherche se fait sur: nom, prénom, matricule, classe
+
+**Méthode recommandée:**
+- Utiliser un GtkTreeModelFilter
+- Définir une fonction de filtrage custom
+- Appliquer le filtre sur le ListStore
+
+---
+
+## 🔨 PHASE 6: COMPILATION ET TESTS {#phase-6}
+
+### 6.1 Compiler le projet
+
+**Dans le terminal:**
+
+```bash
+# Nettoyer
+make clean
+
+# Compiler
+make
+
+# Si erreurs de compilation:
+# - Vérifie que tous les #include sont corrects
+# - Vérifie que pkg-config trouve GTK+
+pkg-config --cflags --libs gtk+-3.0
+
+# Vérifier les dépendances
+ldd ./bulletin_scanner
+```
+
+### 6.2 Tester l'interface
+
+**Test 1 - Lancement:**
+```bash
+./bulletin_scanner
+```
+
+Vérifie que:
+- La fenêtre principale s'ouvre
+- Le menu fonctionne
+- Le tableau est vide (c'est normal si la BD est vide)
+
+**Test 2 - Création manuelle:**
+1. Menu → Nouveau bulletin
+2. Remplis le formulaire
+3. Ajoute 2-3 matières
+4. Vérifie que la moyenne se calcule
+5. Enregistre
+6. Vérifie que l'élève apparaît dans le tableau
+
+**Test 3 - Visualisation:**
+1. Double-clique sur l'élève dans le tableau
+2. Vérifie que toutes les infos s'affichent
+3. Teste le bouton "Modifier"
+4. Modifie une note
+5. Enregistre
+6. Réouvre pour vérifier la modification
+
+**Test 4 - Recherche:**
+1. Crée plusieurs élèves
+2. Tape un nom dans la barre de recherche
+3. Vérifie que le filtrage fonctionne
+
+**Test 5 - Scanner (si OCR configuré):**
+1. Menu → Scanner bulletin
+2. Sélectionne une image de test
+3. Lance le scan
+4. Vérifie que le texte est extrait
+5. Corrige les erreurs
+6. Enregistre
+
+**Test 6 - Suppression:**
+1. Sélectionne un élève
+2. Double-clique pour ouvrir
+3. Clique "Supprimer"
+4. Confirme
+5. Vérifie qu'il disparaît du tableau
+
+### 6.3 Déboguer les erreurs courantes
+
+**Erreur: Fichier .glade introuvable**
+- Solution: Vérifie le chemin dans `gtk_builder_add_from_file()`
+- Mets le chemin absolu ou relatif correct
+
+**Erreur: Widget NULL après gtk_builder_get_object()**
+- Solution: L'ID dans Glade ne correspond pas à celui dans le code
+- Vérifie les IDs dans Glade (ouvre le .glade avec un éditeur de texte)
+
+**Erreur: Callback non trouvé**
+- Solution: Vérifie que le nom du callback dans Glade correspond au nom de la fonction dans gui.c
+- Vérifie que la fonction est bien définie
+
+**Erreur de segmentation:**
+- Utilise gdb pour déboguer:
+```bash
+gdb ./bulletin_scanner
+run
+# Quand ça crash:
+backtrace
+```
+
+**TreeView ne se remplit pas:**
+- Vérifie que le ListStore est bien associé au TreeView
+- Vérifie que les colonnes sont bien configurées
+- Vérifie les indices des colonnes
+
+**La moyenne ne se calcule pas:**
+- Ajoute des printf() pour déboguer
+- Vérifie que les callbacks sont bien appelés
+- Vérifie les types de données (gint, gdouble, etc.)
+
+### 6.4 Optimisations possibles
+
+**Performance:**
+- Ne recharge pas tout le ListStore à chaque modification
+- Utilise gtk_list_store_set() pour modifier une ligne existante
+- Mets en cache les requêtes SQL fréquentes
+
+**UX (Expérience utilisateur):**
+- Ajoute des barres de progression pour les opérations longues (OCR)
+- Ajoute des messages de confirmation pour toutes les actions importantes
+- Ajoute des tooltips sur les boutons (propriété "tooltip-text" dans Glade)
+- Ajoute des accélérateurs clavier pour les actions fréquentes
+
+**Validation:**
+- Vérifie que les notes sont entre 0 et 20
+- Vérifie que les coefficients sont > 0
+- Vérifie que les champs obligatoires sont remplis
+- Affiche des messages d'erreur clairs
+
+### 6.5 Créer un script de lancement
+
+Crée `run.sh`:
+
+```bash
+#!/bin/bash
+
+# Script de lancement de l'application
+
+# Vérifier que la base de données existe
+if [ ! -f "data/bulletins.db" ]; then
+    echo "Création de la base de données..."
+    mkdir -p data
+fi
+
+# Vérifier que le fichier Glade existe
+if [ ! -f "ui/bulletin_app.glade" ]; then
+    echo "ERREUR: Fichier ui/bulletin_app.glade introuvable!"
+    exit 1
+fi
+
+# Lancer l'application
+./bulletin_scanner
+
+# Ou avec redirection des erreurs:
+# ./bulletin_scanner 2> errors.log
+```
+
+Rends-le exécutable:
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+---
+
+## ✅ CHECKLIST FINALE {#checklist}
+
+### Interface Glade
+
+- [ ] Fenêtre principale créée avec tous les widgets
+- [ ] Menu bar avec tous les menus et items
+- [ ] Barre de recherche fonctionnelle
+- [ ] TreeView principal avec ListStore et colonnes
+- [ ] Statusbar en bas
+- [ ] Dialogue de scan complet (FileChooser, OCR, formulaire)
+- [ ] Dialogue de création manuelle
+- [ ] Dialogue de visualisation/modification
+- [ ] Dialogue d'ajout de matière
+- [ ] Tous les widgets ont des IDs uniques et cohérents
+- [ ] Tous les signaux sont définis dans Glade
+- [ ] Fichier .glade sauvegardé dans ui/
+
+### Code C - Structure
+
+- [ ] Fichier gui.h créé avec structure AppWidgets
+- [ ] Fichier gui.c créé avec toutes les fonctions
+- [ ] Prototypes de tous les callbacks dans gui.h
+- [ ] Includes GTK+ et autres headers nécessaires
+- [ ] Structure AppWidgets contient tous les pointeurs
+- [ ] Makefile modifié avec flags GTK+
+
+### Code C - Initialisation
+
+- [ ] Fonction init_gui() qui initialise GTK
+- [ ] Fonction load_interface() qui charge le .glade
+- [ ] GtkBuilder récupère tous les widgets
+- [ ] Fonction connect_signals() connecte tous les callbacks
+- [ ] Fonction setup_treeviews() configure les TreeViews
+- [ ] Fonction run_gui() lance la boucle principale GTK
+
+### Code C - Callbacks fenêtre principale
+
+- [ ] on_menu_scanner_activate() ouvre dialogue scan
+- [ ] on_menu_nouveau_activate() ouvre dialogue création
+- [ ] on_menu_recherche_activate() ouvre dialogue recherche
+- [ ] on_menu_quit_activate() ferme l'application
+- [ ] on_menu_about_activate() affiche dialogue À propos
+- [ ] on_search_changed() filtre les résultats
+- [ ] on_btn_refresh_clicked() recharge la liste
+- [ ] on_treeview_row_activated() ouvre bulletin
+
+### Code C - Callbacks dialogue scan
+
+- [ ] on_filechooser_file_set() gère sélection fichier
+- [ ] on_btn_lancer_scan_clicked() lance l'OCR
+- [ ] on_btn_add_matiere_clicked() ouvre dialogue ajout
+- [ ] on_btn_remove_matiere_clicked() supprime matière
+- [ ] on_btn_recalc_clicked() recalcule moyenne
+- [ ] on_cell_edited() pour toutes les cellules éditables
+- [ ] on_matiere_validee_toggled() gère case à cocher
+
+### Code C - Callbacks dialogue visualisation
+
+- [ ] on_btn_edit_clicked() bascule en mode édition
+- [ ] on_btn_save_clicked() enregistre modifications
+- [ ] on_btn_delete_clicked() supprime bulletin
+- [ ] on_btn_export_pdf_clicked() exporte en PDF
+- [ ] on_btn_close_view_clicked() ferme dialogue
+
+### Code C - Fonctions utilitaires
+
+- [ ] charger_liste_eleves() remplit TreeView principal
+- [ ] calculer_moyenne_gui() calcule et affiche moyenne
+- [ ] afficher_message() dans statusbar
+- [ ] afficher_erreur() dialogue d'erreur GTK
+- [ ] confirmer_action() dialogue de confirmation
+- [ ] clear_liststore() vide un ListStore
+- [ ] valider_formulaire() vérifie les champs
+
+### Intégration avec code existant
+
+- [ ] Les fonctions database.c sont appelées correctement
+- [ ] Les fonctions ocr_utils.c sont appelées correctement
+- [ ] Les structures Eleve et Matiere sont compatibles
+- [ ] La base de données SQLite fonctionne avec GUI
+- [ ] Pas de conflit entre GUI et code ligne de commande
+
+### Tests fonctionnels
+
+- [ ] L'application se lance sans erreur
+- [ ] La fenêtre principale s'affiche correctement
+- [ ] Le menu fonctionne (tous les items)
+- [ ] La création manuelle fonctionne
+- [ ] L'ajout de matières fonctionne
+- [ ] Le calcul de moyenne est correct
+- [ ] L'enregistrement en base fonctionne
+- [ ] Le tableau principal se remplit
+- [ ] La recherche filtre correctement
+- [ ] La visualisation affiche toutes les infos
+- [ ] La modification fonctionne
+- [ ] La suppression fonctionne
+- [ ] Le scan OCR fonctionne (si configuré)
+- [ ] L'export PDF fonctionne (si implémenté)
+
+### Finitions
+
+- [ ] Messages d'erreur clairs et en français
+- [ ] Messages de confirmation avant actions importantes
+- [ ] Tooltips sur les boutons principaux
+- [ ] Interface responsive (redimensionnable)
+- [ ] Pas de memory leaks (testé avec valgrind)
+- [ ] Code commenté et bien structuré
+- [ ] README avec instructions d'installation et utilisation
+- [ ] Script de lancement créé
+
+---
+
+## 📚 RESSOURCES COMPLÉMENTAIRES
+
+### Documentation officielle
+
+- **GTK+ 3 Reference Manual**: https://docs.gtk.org/gtk3/
+- **Glade Manual**: https://glade.gnome.org/
+- **GObject Tutorial**: https://docs.gtk.org/gobject/
+
+### Tutoriels recommandés
+
+1. **GTK+ Tutorial for Beginners**: https://zetcode.com/gui/gtk2/
+2. **Glade GUI Tutorial**: https://prognotes.net/glade-gui-programming-tutorial/
+3. **TreeView Tutorial**: https://developer.gnome.org/gtk3/stable/TreeWidget.html
+
+### Exemples de code
+
+- **GNOME GitLab**: https://gitlab.gnome.org/GNOME/gtk
+- **GitHub GTK Examples**: Cherche "gtk3 examples C"
+
+### Outils utiles
+
+- **Glade**: Éditeur d'interface graphique
+- **GTK Inspector**: Débogueur d'interface (lance avec GTK_DEBUG=interactive)
+- **Devhelp**: Documentation GTK+ hors ligne
+- **GDB**: Débogueur C
+- **Valgrind**: Détection de fuites mémoire
+
+### Commandes utiles
+
+```bash
+# Lancer avec l'inspecteur GTK
+GTK_DEBUG=interactive ./bulletin_scanner
+
+# Vérifier les memory leaks
+valgrind --leak-check=full ./bulletin_scanner
+
+# Voir les signaux GTK disponibles
+GTK_DEBUG=signals ./bulletin_scanner
+
+# Lister les widgets disponibles
+pkg-config --list-all | grep gtk
+```
+
+---
+
+## 🎯 PROCHAINES ÉTAPES SUGGÉRÉES
+
+### Améliorations futures
+
+1. **Export PDF amélioré**
+   - Utiliser Cairo pour générer des PDF propres
+   - Template de bulletin professionnel
+   - Logo de l'établissement
+
+2. **Statistiques avancées**
+   - Graphiques avec Cairo ou autre bibliothèque
+   - Histogrammes de notes
+   - Évolution des moyennes
+   - Comparaisons entre élèves
+
+3. **Gestion multi-utilisateurs**
+   - Système de connexion
+   - Différents niveaux d'accès (admin, prof, étudiant)
+   - Base de données avec tables users
+
+4. **Import/Export**
+   - Import CSV de listes d'élèves
+   - Export Excel des bulletins
+   - Sauvegarde/restauration de la base
+
+5. **Notifications**
+   - Système de rappels
+   - Alertes pour bulletins incomplets
+   - Notifications de modification
+
+6. **Mode sombre**
+   - Thème clair/sombre
+   - Préférences utilisateur
+   - Sauvegarde des paramètres
+
+7. **Internationalisation**
+   - Support multilingue (français, anglais, etc.)
+   - Utiliser gettext
+   - Traduction de l'interface
+
+8. **Documentation**
+   - Manuel utilisateur PDF
+   - Guide d'installation détaillé
+   - Vidéo tutoriel
+   - FAQ
+
+---
+
+## 💡 CONSEILS FINAUX
+
+### Bonnes pratiques
+
+1. **Sauvegarde régulière**
+   - Utilise Git pour versioner ton code
+   - Commit après chaque fonctionnalité qui marche
+   - Crée des branches pour les nouvelles fonctionnalités
+
+2. **Débogage efficace**
+   - Utilise des printf() pour tracer l'exécution
+   - Utilise GDB pour les crashes
+   - Teste chaque fonctionnalité isolément
+
+3. **Organisation du code**
+   - Un fichier par dialogue/fenêtre si le projet grandit
+   - Sépare la logique métier de l'interface
+   - Commente les parties complexes
+
+4. **Tests**
+   - Teste avec des données réelles
+   - Teste les cas limites (notes à 0, à 20, etc.)
+   - Teste avec beaucoup d'élèves (performance)
+
+5. **Performance**
+   - Ne recharge que ce qui a changé
+   - Utilise des requêtes SQL optimisées
+   - Mets en cache les données fréquemment accédées
+
+### Ordre de développement recommandé
+
+1. D'abord, fais fonctionner la fenêtre principale
+2. Ensuite, le dialogue de création manuelle (plus simple)
+3. Puis, le dialogue de visualisation
+4. Ensuite, le dialogue de scan (plus complexe)
+5. Enfin, les fonctionnalités avancées (export PDF, etc.)
+
+### En cas de blocage
+
+1. Relis le guide étape par étape
+2. Vérifie les IDs des widgets dans Glade
+3. Vérifie que les signaux sont bien connectés
+4. Consulte la documentation GTK+
+5. Cherche des exemples similaires sur GitHub
+6. Pose des questions sur les forums (Stack Overflow, Reddit r/gtk)
+
+---
+
+## 🎉 CONCLUSION
+
+Tu as maintenant un guide complet pour créer l'interface GTK+ de ton scanner de bulletins !
+
+**Récapitulatif du projet:**
+- ✅ Interface graphique moderne avec Glade
+- ✅ 4 fenêtres/dialogues principales
+- ✅ Intégration avec ton code C existant
+- ✅ Scanner OCR avec prévisualisation et correction
+- ✅ Création/modification/suppression de bulletins
+- ✅ Recherche et filtrage
+- ✅ Statistiques et calculs automatiques
+
+**Temps estimé de réalisation:**
+- Interface Glade: 4-6 heures
+- Code C d'intégration: 8-12 heures
+- Tests et débogages: 4-6 heures
+- **Total: 16-24 heures** (pour un développeur débutant en GTK+)
+
+**Résultat final:**
+Une application de bureau complète et professionnelle pour la dématérialisation des bulletins scolaires, avec interface intuitive et toutes les fonctionnalités nécessaires !
+
+Bon courage pour le développement ! 🚀
+
+---
+
+**Version du guide:** 1.0  
+**Date:** Janvier 2025  
+**Compatibilité:** GTK+ 3.x, Glade 3.x, GCC, Linuxt

@@ -11,6 +11,7 @@ int creer_tables(sqlite3 *db);
 // Opérations CRUD
 int inserer_eleve(sqlite3 *db, Eleve *eleve);
 Eleve* recuperer_eleve(sqlite3 *db, int id);
+int supprimer_eleve(sqlite3 *db, int eleve_id);
 Eleve* rechercher_par_matricule(sqlite3 *db, const char* matricule);
 void lister_tous_eleves(sqlite3 *db);
 

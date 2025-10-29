@@ -1,0 +1,42 @@
+ Ce que je vous conseille MAINTENANT
+OUI, relisez tout le code en suivant cette méthode :
+1. Ouvrez database.c
+2. Lisez ligne par ligne
+3. Pour chaque fonction, écrivez sur papier :
+   - Son nom
+   - Ce qu'elle fait (en français simple)
+   - Quelles variables elle utilise
+   - Quelle autre fonction elle appelle
+
+4. Ensuite, essayez de RÉÉCRIRE la fonction sans regarder
+5. Comparez avec l'original
+Ressources pour apprendre
+C Programming:
+
+Livre : "Le langage C" de Brian Kernighan (le créateur du C!)
+Site : https://openclassrooms.com/fr/courses/19980-apprenez-a-programmer-en-c
+
+GTK:
+
+Doc officielle : https://docs.gtk.org/gtk3/
+Tutoriel : https://www.gtk.org/docs/getting-started/
+
+SQLite:
+
+Site officiel : https://www.sqlite.org/docs.html
+
+✅ Checklist de compréhension
+Avant de dire "J'ai compris", assurez-vous de pouvoir :
+
+ Expliquer à quelqu'un ce que fait chaque fichier
+ Modifier une fonction simple (ex: changer le calcul de moyenne)
+ Ajouter un nouveau champ dans la base de données
+ Créer un nouveau bouton dans l'interface
+ Débugger une erreur simple
+
+4. Concernant le PDF
+Pour la génération de PDF, c'est une excellente idée mais pas prioritaire maintenant. Concentrez-vous d'abord sur :
+
+✅ Comprendre le code actuel
+✅ Tester toutes les fonctionnalités
+Ensuite, ajouter PDF (bibliothèque: libharu ou Cairo)

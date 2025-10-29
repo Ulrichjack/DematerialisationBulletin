@@ -1,0 +1,749 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk+" version="3.20"/>
+
+  <!-- LISTSTORE ÉLÈVES (PRINCIPAL) -->
+  <object class="GtkListStore" id="liststore_eleves">
+    <columns>
+      <column type="gint"/>      <!-- 0: ID -->
+      <column type="gchararray"/><!-- 1: Nom -->
+      <column type="gchararray"/><!-- 2: Prénom -->
+      <column type="gchararray"/><!-- 3: Matricule -->
+      <column type="gchararray"/><!-- 4: Classe -->
+      <column type="gdouble"/>   <!-- 5: Moyenne -->
+      <column type="gchararray"/><!-- 6: Année -->
+    </columns>
+  </object>
+
+  <!-- LISTSTORE MATIÈRES (DIALOGUE D'ÉDITION) -->
+  <object class="GtkListStore" id="liststore_edit_matieres">
+    <columns>
+      <column type="gchararray"/> <!-- 0: Nom Matière -->
+      <column type="gdouble"/>    <!-- 1: Note -->
+      <column type="gdouble"/>    <!-- 2: Coefficient -->
+      <column type="gchararray"/> <!-- 3: Appreciation -->
+    </columns>
+  </object>
+
+  <!-- LISTSTORE MATIÈRES (PANNEAU DE DÉTAILS) -->
+  <object class="GtkListStore" id="liststore_details_matieres">
+    <columns>
+      <column type="gchararray"/> <!-- 0: Nom Matière -->
+      <column type="gdouble"/>    <!-- 1: Note -->
+      <column type="gdouble"/>    <!-- 2: Coefficient -->
+      <column type="gchararray"/> <!-- 3: Appreciation -->
+      <column type="gint"/>       <!-- 4: Semestre -->
+    </columns>
+  </object>
+
+  <!-- FENÊTRE PRINCIPALE -->
+  <object class="GtkWindow" id="main_window">
+    <property name="visible">True</property>
+    <property name="title">Gestion des Bulletins Scolaires</property>
+    <property name="default-width">1400</property>
+    <property name="default-height">800</property>
+    <property name="window-position">center</property>
+    <signal name="destroy" handler="gtk_main_quit" swapped="no"/>
+    <child>
+      <object class="GtkBox" id="main_vbox">
+        <property name="visible">True</property>
+        <property name="orientation">vertical</property>
+
+        <!-- MENU BAR -->
+        <child>
+          <object class="GtkMenuBar" id="menubar">
+            <property name="visible">True</property>
+            <child>
+              <object class="GtkMenuItem">
+                <property name="visible">True</property>
+                <property name="label">_Fichier</property>
+                <property name="use-underline">True</property>
+                <child type="submenu">
+                  <object class="GtkMenu">
+                    <property name="visible">True</property>
+                    <child>
+                      <object class="GtkMenuItem" id="menu_scanner">
+                        <property name="visible">True</property>
+                        <property name="label">Scanner un bulletin</property>
+                        <signal name="activate" handler="on_menu_scanner_activate" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="menu_nouveau">
+                        <property name="visible">True</property>
+                        <property name="label">Nouveau bulletin (manuel)</property>
+                        <signal name="activate" handler="on_menu_nouveau_activate" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkSeparatorMenuItem">
+                        <property name="visible">True</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkMenuItem" id="menu_quit">
+                        <property name="visible">True</property>
+                        <property name="label">Quitter</property>
+                        <signal name="activate" handler="on_menu_quit_activate" swapped="no"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkMenuItem">
+                <property name="visible">True</property>
+                <property name="label">_Édition</property>
+                <property name="use-underline">True</property>
+                <child type="submenu">
+                  <object class="GtkMenu">
+                    <property name="visible">True</property>
+                    <child>
+                      <object class="GtkMenuItem" id="menu_supprimer">
+                        <property name="visible">True</property>
+                        <property name="label">Supprimer l'élève sélectionné</property>
+                        <signal name="activate" handler="on_menu_supprimer_activate" swapped="no"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkMenuItem">
+                <property name="visible">True</property>
+                <property name="label">_Aide</property>
+                <property name="use-underline">True</property>
+                <child type="submenu">
+                  <object class="GtkMenu">
+                    <property name="visible">True</property>
+                    <child>
+                      <object class="GtkMenuItem" id="menu_about">
+                        <property name="visible">True</property>
+                        <property name="label">À propos</property>
+                        <signal name="activate" handler="on_menu_about_activate" swapped="no"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+          </packing>
+        </child>
+
+        <!-- CONTENU PRINCIPAL (PANNEAU DIVISÉ) -->
+        <child>
+          <object class="GtkPaned" id="main_paned">
+            <property name="visible">True</property>
+            <property name="position">500</property>
+            
+            <!-- PANNEAU GAUCHE : LISTE DES ÉLÈVES -->
+            <child>
+              <object class="GtkBox" id="left_pane_box">
+                <property name="visible">True</property>
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkBox" id="search_box">
+                    <property name="visible">True</property>
+                    <property name="spacing">10</property>
+                    <property name="margin">10</property>
+                    <child>
+                      <object class="GtkSearchEntry" id="search_entry">
+                        <property name="visible">True</property>
+                        <property name="placeholder-text">Rechercher par nom, prénom ou matricule...</property>
+                        <signal name="search-changed" handler="on_search_changed" swapped="no"/>
+                      </object>
+                      <packing>
+                        <property name="expand">True</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="btn_refresh">
+                        <property name="visible">True</property>
+                        <property name="label">🔄 Actualiser</property>
+                        <signal name="clicked" handler="on_btn_refresh_clicked" swapped="no"/>
+                      </object>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                  </packing>
+                </child>
+                <!-- BARRE D'OUTILS PRINCIPALE -->
+                <child>
+                  <object class="GtkBox" id="toolbar_box">
+                    <property name="visible">True</property>
+                    <property name="spacing">10</property>
+                    <property name="margin">10</property>
+                    <property name="margin-top">0</property>
+                    <child>
+                      <object class="GtkButton" id="btn_toolbar_scan">
+                        <property name="visible">True</property>
+                        <property name="label">📄 Scanner</property>
+                        <signal name="clicked" handler="on_menu_scanner_activate" swapped="no"/>
+                      </object>
+                      <packing>
+                        <property name="expand">True</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="btn_toolbar_nouveau">
+                        <property name="visible">True</property>
+                        <property name="label">➕ Nouveau</property>
+                        <signal name="clicked" handler="on_menu_nouveau_activate" swapped="no"/>
+                      </object>
+                      <packing>
+                        <property name="expand">True</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="btn_toolbar_supprimer">
+                        <property name="visible">True</property>
+                        <property name="label">🗑️ Supprimer</property>
+                        <signal name="clicked" handler="on_menu_supprimer_activate" swapped="no"/>
+                      </object>
+                      <packing>
+                        <property name="expand">True</property>
+                      </packing>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkScrolledWindow" id="scrolled_eleves">
+                    <property name="visible">True</property>
+                    <property name="shadow-type">in</property>
+                    <child>
+                      <object class="GtkTreeView" id="treeview_eleves">
+                        <property name="visible">True</property>
+                        <property name="model">liststore_eleves</property>
+                        <signal name="cursor-changed" handler="on_treeview_selection_changed" swapped="no"/>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Nom</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">1</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Prénom</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">2</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Moyenne</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">5</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                  <packing>
+                    <property name="expand">True</property>
+                  </packing>
+                </child>
+              </object>
+              <packing><property name="resize">False</property></packing>
+            </child>
+
+            <!-- PANNEAU DROIT : DÉTAILS DE L'ÉLÈVE -->
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="visible">True</property>
+                <child>
+                  <object class="GtkBox" id="details_box">
+                    <property name="visible">True</property>
+                    <property name="orientation">vertical</property>
+                    <property name="margin">20</property>
+                    <property name="spacing">15</property>
+                    <child>
+                      <object class="GtkLabel" id="lbl_details_title">
+                        <property name="visible">True</property>
+                        <property name="label">Sélectionnez un élève pour voir les détails</property>
+                        <attributes>
+                          <attribute name="weight" value="bold"/>
+                          <attribute name="scale" value="1.5"/>
+                        </attributes>
+                      </object>
+                      <packing><property name="expand">False</property></packing>
+                    </child>
+                    
+                    <!-- BOUTON MODIFIER -->
+                    <child>
+                      <object class="GtkButton" id="btn_modifier_details">
+                        <property name="visible">False</property>
+                        <property name="label">✏️ Modifier ce bulletin</property>
+                        <property name="halign">start</property>
+                      </object>
+                      <packing><property name="expand">False</property></packing>
+                    </child>
+                    
+                    <child>
+                      <object class="GtkGrid" id="grid_details_infos">
+                        <property name="visible">False</property>
+                        <property name="row-spacing">8</property>
+                        <property name="column-spacing">10</property>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="visible">True</property>
+                            <property name="label">Matricule :</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="lbl_detail_matricule">
+                            <property name="visible">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">1</property>
+                            <property name="top-attach">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="visible">True</property>
+                            <property name="label">Classe :</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">0</property>
+                            <property name="top-attach">1</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="lbl_detail_classe">
+                            <property name="visible">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">1</property>
+                            <property name="top-attach">1</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="visible">True</property>
+                            <property name="label">Année :</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">2</property>
+                            <property name="top-attach">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="lbl_detail_annee">
+                            <property name="visible">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">3</property>
+                            <property name="top-attach">0</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel">
+                            <property name="visible">True</property>
+                            <property name="label">Moyenne :</property>
+                            <property name="xalign">1</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">2</property>
+                            <property name="top-attach">1</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="lbl_detail_moyenne">
+                            <property name="visible">True</property>
+                          </object>
+                          <packing>
+                            <property name="left-attach">3</property>
+                            <property name="top-attach">1</property>
+                          </packing>
+                        </child>
+                      </object>
+                      <packing><property name="expand">False</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkTreeView" id="treeview_details_matieres">
+                        <property name="visible">False</property>
+                        <property name="model">liststore_details_matieres</property>
+                        <property name="vexpand">True</property>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Matière</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">0</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Note</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">1</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Coef.</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">2</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkTreeViewColumn">
+                            <property name="title">Appréciation</property>
+                            <child>
+                              <object class="GtkCellRendererText"/>
+                              <attributes>
+                                <attribute name="text">3</attribute>
+                              </attributes>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="lbl_stats_s1">
+                        <property name="visible">False</property>
+                        <property name="xalign">0</property>
+                      </object>
+                      <packing><property name="expand">False</property></packing>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="lbl_stats_s2">
+                        <property name="visible">False</property>
+                        <property name="xalign">0</property>
+                      </object>
+                      <packing><property name="expand">False</property></packing>
+                    </child>
+                  </object>
+                </child>
+              </object>
+              <packing><property name="resize">True</property></packing>
+            </child>
+          </object>
+          <packing><property name="expand">True</property></packing>
+        </child>
+
+        <!-- STATUSBAR -->
+        <child>
+          <object class="GtkStatusbar" id="statusbar">
+            <property name="visible">True</property>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+          </packing>
+        </child>
+      </object>
+    </child>
+  </object>
+
+  <!-- DIALOGUE SCAN ET ÉDITION -->
+  <object class="GtkDialog" id="dialog_scan">
+    <property name="title">Scanner et Éditer un Bulletin</property>
+    <property name="modal">True</property>
+    <property name="default-width">1000</property>
+    <property name="default-height">750</property>
+    <property name="type-hint">dialog</property>
+    <child internal-child="vbox">
+      <object class="GtkBox">
+        <property name="visible">True</property>
+        <property name="orientation">vertical</property>
+        <property name="spacing">10</property>
+        <property name="margin">15</property>
+        <child>
+          <object class="GtkBox">
+            <property name="visible">True</property>
+            <property name="spacing">10</property>
+            <child>
+              <object class="GtkFileChooserButton" id="filechooser_scan">
+                <property name="visible">True</property>
+                <property name="title">Sélectionner un bulletin (PDF ou image)</property>
+                <signal name="file-set" handler="on_filechooser_file_set" swapped="no"/>
+              </object>
+              <packing><property name="expand">True</property></packing>
+            </child>
+            <child>
+              <object class="GtkButton" id="btn_lancer_scan">
+                <property name="visible">True</property>
+                <property name="label">Lancer le scan OCR</property>
+                <property name="sensitive">False</property>
+                <signal name="clicked" handler="on_btn_lancer_scan_clicked" swapped="no"/>
+              </object>
+            </child>
+          </object>
+          <packing><property name="expand">False</property></packing>
+        </child>
+        <child>
+          <object class="GtkExpander" id="expander_ocr">
+            <property name="visible">True</property>
+            <property name="label">Texte extrait par OCR</property>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="visible">True</property>
+                <property name="height-request">150</property>
+                <child>
+                  <object class="GtkTextView" id="textview_ocr">
+                    <property name="visible">True</property>
+                    <property name="editable">False</property>
+                    <property name="monospace">True</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+          <packing><property name="expand">False</property></packing>
+        </child>
+        <child>
+          <object class="GtkGrid">
+            <property name="visible">True</property>
+            <property name="margin-top">10</property>
+            <property name="row-spacing">10</property>
+            <property name="column-spacing">10</property>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="label">Nom :</property>
+                <property name="xalign">1</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="entry_nom">
+                <property name="visible">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="label">Prénom :</property>
+                <property name="xalign">1</property>
+              </object>
+              <packing>
+                <property name="left-attach">2</property>
+                <property name="top-attach">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="entry_prenom">
+                <property name="visible">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">3</property>
+                <property name="top-attach">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="label">Matricule :</property>
+                <property name="xalign">1</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="entry_matricule">
+                <property name="visible">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="label">Classe :</property>
+                <property name="xalign">1</property>
+              </object>
+              <packing>
+                <property name="left-attach">2</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="entry_classe">
+                <property name="visible">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">3</property>
+                <property name="top-attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="visible">True</property>
+                <property name="label">Année acad. :</property>
+                <property name="xalign">1</property>
+              </object>
+              <packing>
+                <property name="left-attach">0</property>
+                <property name="top-attach">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkEntry" id="entry_annee">
+                <property name="visible">True</property>
+              </object>
+              <packing>
+                <property name="left-attach">1</property>
+                <property name="top-attach">2</property>
+              </packing>
+            </child>
+          </object>
+          <packing><property name="expand">False</property></packing>
+        </child>
+        <child>
+          <object class="GtkLabel">
+            <property name="visible">True</property>
+            <property name="label">Double-cliquez sur une cellule pour la modifier. Utilisez les boutons pour ajouter/supprimer des lignes.</property>
+            <property name="margin-top">10</property>
+          </object>
+          <packing><property name="expand">False</property></packing>
+        </child>
+        <child>
+          <object class="GtkScrolledWindow">
+            <property name="visible">True</property>
+            <property name="vexpand">True</property>
+            <property name="margin-top">10</property>
+            <child>
+              <object class="GtkTreeView" id="treeview_edit_matieres">
+                <property name="visible">True</property>
+                <property name="model">liststore_edit_matieres</property>
+                <child>
+                  <object class="GtkTreeViewColumn">
+                    <property name="title">Matière</property>
+                    <property name="min-width">400</property>
+                    <child>
+                      <object class="GtkCellRendererText" id="cell_edit_nom">
+                        <property name="editable">True</property>
+                      </object>
+                      <attributes>
+                        <attribute name="text">0</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn">
+                    <property name="title">Note</property>
+                    <child>
+                      <object class="GtkCellRendererText" id="cell_edit_note">
+                        <property name="editable">True</property>
+                      </object>
+                      <attributes>
+                        <attribute name="text">1</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkTreeViewColumn">
+                    <property name="title">Coefficient</property>
+                    <child>
+                      <object class="GtkCellRendererText" id="cell_edit_coef">
+                        <property name="editable">True</property>
+                      </object>
+                      <attributes>
+                        <attribute name="text">2</attribute>
+                      </attributes>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+          <packing><property name="expand">True</property></packing>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="visible">True</property>
+            <property name="spacing">10</property>
+            <property name="margin-top">5</property>
+            <child>
+              <object class="GtkButton" id="btn_add_matiere">
+                <property name="visible">True</property>
+                <property name="label">Ajouter une matière</property>
+                <signal name="clicked" handler="on_btn_add_matiere_clicked" />
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="btn_del_matiere">
+                <property name="visible">True</property>
+                <property name="label">Supprimer la matière</property>
+                <signal name="clicked" handler="on_btn_del_matiere_clicked" />
+              </object>
+            </child>
+          </object>
+          <packing><property name="expand">False</property></packing>
+        </child>
+      </object>
+    </child>
+    <child type="action">
+      <object class="GtkButton" id="btn_cancel">
+        <property name="visible">True</property>
+        <property name="label">gtk-cancel</property>
+        <property name="use-stock">True</property>
+      </object>
+    </child>
+    <child type="action">
+      <object class="GtkButton" id="btn_scan_save">
+        <property name="visible">True</property>
+        <property name="label">Enregistrer</property>
+        <property name="sensitive">False</property>
+        <signal name="clicked" handler="on_btn_scan_save_clicked" swapped="no"/>
+      </object>
+    </child>
+    <action-widgets>
+      <action-widget response="-6">btn_cancel</action-widget>
+      <action-widget response="-5">btn_scan_save</action-widget>
+    </action-widgets>
+  </object>
+</interface>

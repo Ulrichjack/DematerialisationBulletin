@@ -7,7 +7,7 @@
 #include "ocr_utils.h"
 #include "database.h"
 
-// ========== EXTRACTION SIMPLE ET EFFICACE ==========
+// ========== EXTRACTION OCR (INCHANGÉ) ==========
 
 char* extraire_texte_image(const char* chemin_image) {
     TessBaseAPI *api = TessBaseAPICreate();
@@ -71,30 +71,7 @@ char* extraire_texte_image(const char* chemin_image) {
     return texte;
 }
 
-// ========== FONCTIONS UTILITAIRES ==========
-
-void nettoyer_texte_ocr(char *texte) {
-    if (!texte) return;
-    
-    char *p = texte;
-    char *dest = texte;
-    int espace_precedent = 0;
-    
-    while (*p) {
-        if (isspace(*p)) {
-            if (!espace_precedent) {
-                *dest++ = ' ';
-                espace_precedent = 1;
-            }
-            p++;
-        } else {
-            *dest++ = *p++;
-            espace_precedent = 0;
-        }
-    }
-    *dest = '\0';
-    nettoyer_chaine(texte);
-}
+// ========== UTILITAIRES ==========
 
 void extraire_info_apres_label(const char* texte, const char* label, char* destination, int max_len) {
     if (!texte || !label || !destination) return;
@@ -113,44 +90,75 @@ void extraire_info_apres_label(const char* texte, const char* label, char* desti
     nettoyer_chaine(destination);
 }
 
-// ========== DÉTECTION DES CODES - ULTRA SIMPLE ==========
+// ========== DÉTECTION AMÉLIORÉE DES CODES ==========
 
 int est_code_matiere(const char* str) {
     if (!str || strlen(str) < 4) return 0;
     
-    // MCP suivi de chiffres
-    if (strncmp(str, "MCP", 3) == 0) {
-        for (int i = 3; i < strlen(str); i++) {
-            if (isdigit(str[i])) return 1;
+    // Format: MCP + chiffres (ex: MCP31L1101)
+    if (strncmp(str, "MCP", 3) == 0 && strlen(str) >= 8) {
+        int nb_chiffres = 0;
+        for (int i = 3; i < strlen(str) && i < 15; i++) {
+            if (isdigit(str[i])) nb_chiffres++;
         }
+        return nb_chiffres >= 4;
     }
     
-    // CP suivi de chiffres
-    if (strncmp(str, "CP", 2) == 0 && strlen(str) > 4) {
-        for (int i = 2; i < strlen(str); i++) {
-            if (isdigit(str[i])) return 1;
+    // Format: CP + chiffres (ex: CP31L1101 ou CP3IL1104)
+    if (strncmp(str, "CP", 2) == 0 && strlen(str) >= 7) {
+        int nb_chiffres = 0;
+        for (int i = 2; i < strlen(str) && i < 15; i++) {
+            if (isdigit(str[i])) nb_chiffres++;
         }
+        return nb_chiffres >= 4;
     }
     
     return 0;
 }
 
-// ========== STRUCTURE POUR MODULE ==========
+// ========== DÉTECTION MULTI-CRITÈRES DU SEMESTRE 2 ==========
 
-typedef struct {
-    char code_module[50];
-    char nom_module[MAX_MATIERE];
-    int nb_matieres;
-    char codes_cp[20][50];  // Codes des CP dans ce module
-    float notes_cp[20];
-    float coefs_cp[20];
-    float moyenne_module;
-    float coef_module;
-    int semestre;
-    int est_valide;
-} Module;
+int est_debut_semestre2(const char* ligne, int* mcp_vus, int nb_mcp_vus) {
+    // Critère 1 : Mots-clés explicites
+    if (strcasestr(ligne, "Semestre 2") || strcasestr(ligne, "Semester 2") ||
+        strcasestr(ligne, "Résultats Semestre 2") || strcasestr(ligne, "Semester 2 Results") ||
+        strcasestr(ligne, "SEMESTRE 2") || strcasestr(ligne, "S2") ||
+        strcasestr(ligne, "2nd Semester") || strcasestr(ligne, "Second Semester")) {
+        return 1;
+    }
+    
+    // Critère 2 : Détection de MCP31L105+ (après avoir vu MCP31L1101-104)
+    // Si on a déjà vu au moins 4 MCP du S1, et qu'on voit MCP31L105 ou supérieur
+    if (nb_mcp_vus >= 4) {
+        char code[50];
+        char *token = strdup(ligne);
+        char *tok = strtok(token, " \t|");
+        
+        while (tok) {
+            if (strncmp(tok, "MCP31L1", 7) == 0 && strlen(tok) >= 10) {
+                strncpy(code, tok, sizeof(code) - 1);
+                code[sizeof(code) - 1] = '\0';
+                
+                // Extraire le numéro (ex: MCP31L1105 -> 105)
+                if (strlen(code) >= 10 && isdigit(code[7]) && isdigit(code[8]) && isdigit(code[9])) {
+                    int num = atoi(&code[7]);
+                    
+                    // Si >= 105, c'est probablement S2
+                    if (num >= 105 && num <= 110) {
+                        free(token);
+                        return 1;
+                    }
+                }
+            }
+            tok = strtok(NULL, " \t|");
+        }
+        free(token);
+    }
+    
+    return 0;
+}
 
-// ========== EXTRACTION DIRECTE - NOUVELLE APPROCHE ==========
+// ========== STRUCTURE MATIÈRE ==========
 
 typedef struct {
     char code[50];
@@ -158,13 +166,15 @@ typedef struct {
     float note;
     float coef;
     int semestre;
-    char type[10]; // "MCP" ou "CP"
+    char type[10];
     int est_valide;
-    char module_parent[50]; // Pour les CP, code du MCP parent
+    char module_parent[50];
 } InfoMatiere;
 
+// ========== EXTRACTION MATIÈRE AMÉLIORÉE ==========
+
 int extraire_matiere_ligne(const char* ligne, InfoMatiere* info, int semestre_actuel, const char* module_parent) {
-    if (!ligne || !info) return 0;
+    if (!ligne || !info || strlen(ligne) < 10) return 0;
     
     memset(info, 0, sizeof(InfoMatiere));
     info->note = -1;
@@ -176,53 +186,50 @@ int extraire_matiere_ligne(const char* ligne, InfoMatiere* info, int semestre_ac
         strncpy(info->module_parent, module_parent, sizeof(info->module_parent) - 1);
     }
     
+    // Détecter validation
+    if (strcasestr(ligne, "Validé") || strcasestr(ligne, "Valide") ||
+        strcasestr(ligne, "Assez Bien") || strcasestr(ligne, "Bien") || 
+        strcasestr(ligne, "Très Bien") || strcasestr(ligne, "Tres Bien") ||
+        strcasestr(ligne, "Passable")) {
+        info->est_valide = 1;
+    }
+    
+    // Chercher code matière
     char copie[1024];
     strncpy(copie, ligne, sizeof(copie) - 1);
     copie[sizeof(copie) - 1] = '\0';
     
-    // Détecter si validé
-    if (strcasestr(ligne, "Validé") || strcasestr(ligne, "Assez Bien") || 
-        strcasestr(ligne, "Bien") || strcasestr(ligne, "Très Bien")) {
-        info->est_valide = 1;
-    }
-    
-    // Trouver le code de matière
-    char *token = strtok(copie, " \t");
+    char *token = strtok(copie, " \t|");
     while (token) {
         if (est_code_matiere(token)) {
             strncpy(info->code, token, sizeof(info->code) - 1);
-            
-            if (strncmp(token, "MCP", 3) == 0) {
-                strcpy(info->type, "MCP");
-            } else {
-                strcpy(info->type, "CP");
-            }
+            strcpy(info->type, strncmp(token, "MCP", 3) == 0 ? "MCP" : "CP");
             break;
         }
-        token = strtok(NULL, " \t");
+        token = strtok(NULL, " \t|");
     }
     
     if (strlen(info->code) == 0) return 0;
     
-    // Récupérer le reste
-    char reste[512] = "";
-    char *p = strstr(ligne, info->code);
-    if (p) {
-        p += strlen(info->code);
-        while (*p == ' ' || *p == '\t') p++;
-        strncpy(reste, p, sizeof(reste) - 1);
-    }
-    
     // Extraire nom et nombres
+    const char *apres_code = strstr(ligne, info->code);
+    if (!apres_code) return 0;
+    
+    apres_code += strlen(info->code);
+    while (*apres_code == ' ' || *apres_code == '\t') apres_code++;
+    
     char temp_nom[MAX_MATIERE] = "";
     float nombres[20];
     int nb_nombres = 0;
     
+    char reste[512];
+    strncpy(reste, apres_code, sizeof(reste) - 1);
+    reste[sizeof(reste) - 1] = '\0';
+    
     char *tok = strtok(reste, " \t|");
-    int nom_fini = 0;
+    int nom_termine = 0;
     
     while (tok && nb_nombres < 20) {
-        // Remplacer virgule par point
         for (int i = 0; tok[i]; i++) {
             if (tok[i] == ',') tok[i] = '.';
         }
@@ -230,19 +237,14 @@ int extraire_matiere_ligne(const char* ligne, InfoMatiere* info, int semestre_ac
         char *endptr;
         float val = strtof(tok, &endptr);
         
-        // Si c'est un nombre valide
-        if (*endptr == '\0' && (val >= 0.0 && val <= 100.0)) {
+        if (*endptr == '\0' && val >= 0.0 && val <= 100.0) {
             nombres[nb_nombres++] = val;
-            nom_fini = 1;
-        }
-        // Sinon c'est du texte
-        else if (!nom_fini && strlen(tok) > 1) {
-            // Ignorer certains mots clés
-            if (strcasecmp(tok, "Validé") != 0 && 
-                strcasecmp(tok, "Passable") != 0 &&
-                strcasecmp(tok, "Assez") != 0 &&
-                strcasecmp(tok, "Bien") != 0 &&
-                strcasecmp(tok, "Très") != 0) {
+            nom_termine = 1;
+        } else if (!nom_termine && strlen(tok) > 1) {
+            if (strcasecmp(tok, "Validé") != 0 && strcasecmp(tok, "Valide") != 0 &&
+                strcasecmp(tok, "Passable") != 0 && strcasecmp(tok, "Assez") != 0 &&
+                strcasecmp(tok, "Bien") != 0 && strcasecmp(tok, "Très") != 0 &&
+                strcasecmp(tok, "Tres") != 0) {
                 if (strlen(temp_nom) > 0) strcat(temp_nom, " ");
                 strncat(temp_nom, tok, sizeof(temp_nom) - strlen(temp_nom) - 1);
             }
@@ -254,28 +256,34 @@ int extraire_matiere_ligne(const char* ligne, InfoMatiere* info, int semestre_ac
     if (strlen(temp_nom) > 0) {
         strncpy(info->nom, temp_nom, sizeof(info->nom) - 1);
     } else {
-        strcpy(info->nom, "Matière");
+        strcpy(info->nom, "Sans nom");
     }
     
-    // Analyser les nombres: COEF puis NOTE
-    for (int i = 0; i < nb_nombres; i++) {
-        if (info->coef == 1.0 && nombres[i] >= 0.5 && nombres[i] <= 15.0) {
-            info->coef = nombres[i];
+    // Analyser nombres : COEF NOTE (généralement)
+    if (nb_nombres >= 2) {
+        // Heuristique : coef entre 0.5-15, note entre 0-20
+        if (nombres[0] >= 0.5 && nombres[0] <= 15.0 && nombres[1] >= 0.0 && nombres[1] <= 20.0) {
+            info->coef = nombres[0];
+            info->note = nombres[1];
+        } else if (nombres[1] >= 0.5 && nombres[1] <= 15.0 && nombres[0] >= 0.0 && nombres[0] <= 20.0) {
+            info->note = nombres[0];
+            info->coef = nombres[1];
+        } else {
+            info->coef = nombres[0];
+            info->note = nombres[1];
         }
-        else if (info->note < 0.0 && nombres[i] >= 0.0 && nombres[i] <= 20.0) {
-            info->note = nombres[i];
-        }
-    }
-    
-    if (nb_nombres == 1 && info->note < 0.0 && nombres[0] >= 0.0 && nombres[0] <= 20.0) {
+    } else if (nb_nombres == 1) {
         info->note = nombres[0];
         info->coef = 1.0;
     }
     
+    if (info->note < 0.0 || info->note > 20.0) info->note = -1;
+    if (info->coef < 0.5 || info->coef > 15.0) info->coef = 1.0;
+    
     return (strlen(info->code) > 0 && info->note >= 0.0);
 }
 
-// ========== ANALYSE PRINCIPALE AVEC GESTION MODULES ==========
+// ========== ANALYSE PRINCIPALE ULTRA-ROBUSTE ==========
 
 int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
     if (!texte_ocr || !eleve) return 0;
@@ -289,44 +297,47 @@ int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
     
     memset(eleve, 0, sizeof(Eleve));
     strcpy(eleve->date_bulletin, "2025-01-08");
+    strcpy(eleve->matricule, "N/A");
+    strcpy(eleve->niveau, "N/A");
+    strcpy(eleve->annee_academique, "N/A");
+    strcpy(eleve->lieu_naissance, "N/A");
+    strcpy(eleve->date_naissance, "N/A");
     
-    // ========== EXTRACTION INFORMATIONS - CORRIGÉE ==========
+    // ========== EXTRACTION INFORMATIONS ==========
     
-    char temp_nom[MAX_NOM * 2] = "";
+    char temp[512];
     
     // Nom
-    extraire_info_apres_label(texte_copie, "Last & First Name", temp_nom, sizeof(temp_nom));
-    if (strlen(temp_nom) == 0) {
-        extraire_info_apres_label(texte_copie, "Noms et prénoms", temp_nom, sizeof(temp_nom));
-    }
+    extraire_info_apres_label(texte_copie, "Last & First Name", temp, sizeof(temp));
+    if (strlen(temp) == 0) extraire_info_apres_label(texte_copie, "Noms et prénoms", temp, sizeof(temp));
     
-    if (strlen(temp_nom) > 0) {
-        char *p = strcasestr(temp_nom, "Student");
+    if (strlen(temp) > 0) {
+        char *p = strcasestr(temp, "Student");
         if (p) *p = '\0';
-        p = strcasestr(temp_nom, "Matricule");
+        p = strcasestr(temp, "Matricule");
         if (p) *p = '\0';
-        nettoyer_chaine(temp_nom);
+        nettoyer_chaine(temp);
         
-        char *espace = strchr(temp_nom, ' ');
+        char *espace = strchr(temp, ' ');
         if (espace) {
             *espace = '\0';
-            strncpy(eleve->nom, temp_nom, MAX_NOM - 1);
+            strncpy(eleve->nom, temp, MAX_NOM - 1);
             strncpy(eleve->prenom, espace + 1, MAX_PRENOM - 1);
         } else {
-            strncpy(eleve->nom, temp_nom, MAX_NOM - 1);
+            strncpy(eleve->nom, temp, MAX_NOM - 1);
         }
     }
     
     // Matricule
     extraire_info_apres_label(texte_copie, "Student ID", eleve->matricule, MAX_MATRICULE);
-    if (strlen(eleve->matricule) == 0) {
+    if (strlen(eleve->matricule) == 0 || strcmp(eleve->matricule, "N/A") == 0) {
         extraire_info_apres_label(texte_copie, "Matricule", eleve->matricule, MAX_MATRICULE);
     }
     char *p = strchr(eleve->matricule, ' ');
     if (p) *p = '\0';
     nettoyer_chaine(eleve->matricule);
     
-    // Date de naissance - CORRIGÉE
+    // Date naissance
     extraire_info_apres_label(texte_copie, "Date of birth", eleve->date_naissance, 20);
     if (strlen(eleve->date_naissance) == 0) {
         extraire_info_apres_label(texte_copie, "Date de naissance", eleve->date_naissance, 20);
@@ -337,7 +348,7 @@ int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
     if (p) *p = '\0';
     nettoyer_chaine(eleve->date_naissance);
     
-    // Lieu de naissance - CORRIGÉ
+    // Lieu naissance
     extraire_info_apres_label(texte_copie, "Place of birth", eleve->lieu_naissance, MAX_LIEU);
     if (strlen(eleve->lieu_naissance) == 0) {
         extraire_info_apres_label(texte_copie, "Lieu de naissance", eleve->lieu_naissance, MAX_LIEU);
@@ -348,72 +359,23 @@ int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
     if (p) *p = '\0';
     nettoyer_chaine(eleve->lieu_naissance);
     
-    // Spécialité/Classe - CORRECTION AVANCÉE
-    // Chercher "Spécialité" ligne complète
-    char *ligne_spec = strstr(texte_copie, "Spécialité");
-    if (!ligne_spec) ligne_spec = strstr(texte_copie, "Specialty");
-    
-    if (ligne_spec) {
-        char *debut = ligne_spec;
-        while (debut > texte_copie && *(debut-1) != '\n') debut--;
-        char *fin = strchr(ligne_spec, '\n');
-        if (!fin) fin = ligne_spec + strlen(ligne_spec);
-        
-        int len = fin - debut;
-        if (len > 0 && len < 500) {
-            char ligne_temp[512];
-            strncpy(ligne_temp, debut, len);
-            ligne_temp[len] = '\0';
-            
-            // Extraire entre "Spécialité" et "Année"
-            char *apres_label = strstr(ligne_temp, "Spécialité");
-            if (!apres_label) apres_label = strstr(ligne_temp, "Specialty");
-            
-            if (apres_label) {
-                apres_label = strchr(apres_label, ' ');
-                if (apres_label) {
-                    apres_label++;
-                    char *fin_classe = strstr(apres_label, "Année");
-                    if (!fin_classe) fin_classe = strstr(apres_label, "Academic");
-                    
-                    if (fin_classe) {
-                        int len_classe = fin_classe - apres_label;
-                        if (len_classe > 0 && len_classe < MAX_CLASSE) {
-                            strncpy(eleve->classe, apres_label, len_classe);
-                            eleve->classe[len_classe] = '\0';
-                            nettoyer_chaine(eleve->classe);
-                        }
-                    }
-                }
-            }
-        }
+    // Classe/Spécialité
+    extraire_info_apres_label(texte_copie, "Specialty", eleve->classe, MAX_CLASSE);
+    if (strlen(eleve->classe) == 0) {
+        extraire_info_apres_label(texte_copie, "Spécialité", eleve->classe, MAX_CLASSE);
     }
+    p = strcasestr(eleve->classe, "Academic");
+    if (p) *p = '\0';
+    p = strcasestr(eleve->classe, "Année");
+    if (p) *p = '\0';
+    nettoyer_chaine(eleve->classe);
     
-    // Année académique - CORRECTION AVANCÉE
-    if (ligne_spec) {
-        char *annee_pos = strstr(ligne_spec, "Année Académique");
-        if (!annee_pos) annee_pos = strstr(ligne_spec, "Academic Year");
-        
-        if (annee_pos) {
-            annee_pos = strchr(annee_pos, ' ');
-            if (annee_pos) {
-                annee_pos++;
-                annee_pos = strchr(annee_pos, ' ');
-                if (annee_pos) {
-                    annee_pos++;
-                    char *fin_annee = strchr(annee_pos, '\n');
-                    if (!fin_annee) fin_annee = annee_pos + strlen(annee_pos);
-                    
-                    int len_annee = fin_annee - annee_pos;
-                    if (len_annee > 0 && len_annee < MAX_ANNEE) {
-                        strncpy(eleve->annee_academique, annee_pos, len_annee);
-                        eleve->annee_academique[len_annee] = '\0';
-                        nettoyer_chaine(eleve->annee_academique);
-                    }
-                }
-            }
-        }
+    // Année académique
+    extraire_info_apres_label(texte_copie, "Academic Year", eleve->annee_academique, MAX_ANNEE);
+    if (strlen(eleve->annee_academique) == 0) {
+        extraire_info_apres_label(texte_copie, "Année Académique", eleve->annee_academique, MAX_ANNEE);
     }
+    nettoyer_chaine(eleve->annee_academique);
     
     printf("═══════════════════════════════════════════════\n");
     printf("  INFORMATIONS EXTRAITES\n");
@@ -426,85 +388,88 @@ int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
     printf("📅 Année académique  : %s\n", eleve->annee_academique);
     printf("═══════════════════════════════════════════════\n\n");
     
-    // ========== EXTRACTION DES MATIÈRES AVEC MODULES ==========
+    // ========== EXTRACTION MATIÈRES AVEC DÉTECTION ROBUSTE S1/S2 ==========
     
     printf("═══════════════════════════════════════════════\n");
     printf("  EXTRACTION DES MATIÈRES PAR SEMESTRE\n");
     printf("═══════════════════════════════════════════════\n\n");
     
-    Module modules[50];
-    int nb_modules = 0;
-    
-    char *ptr2 = texte_copie;
+    char *ptr = texte_copie;
     int semestre_actuel = 1;
     char module_courant[50] = "";
-    int idx_module_courant = -1;
     
-    while (*ptr2 && eleve->nombre_matieres < MAX_MATIERES) {
-        char *fin_ligne = strchr(ptr2, '\n');
-        if (!fin_ligne) {
-            fin_ligne = ptr2 + strlen(ptr2);
-        }
+    // Tracking des MCP vus pour détecter S2
+    int mcp_codes_s1[20];
+    int nb_mcp_s1 = 0;
+    
+    int nb_modules_s1 = 0, nb_modules_s2 = 0;
+    int nb_matieres_s1 = 0, nb_matieres_s2 = 0;
+    
+    // Calcul position dans le texte
+    int position_actuelle = 0;
+    int longueur_totale = strlen(texte_copie);
+    
+    while (*ptr && eleve->nombre_matieres < MAX_MATIERES) {
+        char *fin_ligne = strchr(ptr, '\n');
+        if (!fin_ligne) fin_ligne = ptr + strlen(ptr);
         
-        int len = fin_ligne - ptr2;
-        if (len > 0 && len < 500) {
-            char ligne_temp[512];
-            strncpy(ligne_temp, ptr2, len);
-            ligne_temp[len] = '\0';
-            nettoyer_chaine(ligne_temp);
+        int len = fin_ligne - ptr;
+        position_actuelle += len + 1;
+        
+        if (len > 0 && len < 1000) {
+            char ligne[1024];
+            strncpy(ligne, ptr, len);
+            ligne[len] = '\0';
+            nettoyer_chaine(ligne);
             
-            // Détection changement de semestre
-            if (strcasestr(ligne_temp, "Semestre 2") || 
-                strcasestr(ligne_temp, "Semester 2") ||
-                strcasestr(ligne_temp, "Résultats Semestre 2")) {
+            // DÉTECTION SEMESTRE 2 (multi-critères)
+            if (semestre_actuel == 1 && est_debut_semestre2(ligne, mcp_codes_s1, nb_mcp_s1)) {
                 semestre_actuel = 2;
-                printf("\n🔄 ═══ PASSAGE AU SEMESTRE 2 ═══\n\n");
                 module_courant[0] = '\0';
-                idx_module_courant = -1;
+                printf("\n🔵 ════════════════════════════════════\n");
+                printf("   PASSAGE AU SEMESTRE 2 DÉTECTÉ !\n");
+                printf("   ════════════════════════════════════\n\n");
             }
             
-            if (strlen(ligne_temp) > 10) {
+            // Heuristique supplémentaire : si > 60% du texte et on voit encore des MCP
+            if (semestre_actuel == 1 && nb_mcp_s1 >= 4 && 
+                position_actuelle > (longueur_totale * 60 / 100)) {
+                if (strstr(ligne, "MCP31L1") != NULL) {
+                    semestre_actuel = 2;
+                    module_courant[0] = '\0';
+                    printf("\n🟡 ════════════════════════════════════\n");
+                    printf("   S2 DÉTECTÉ (position + MCP trouvé)\n");
+                    printf("   ════════════════════════════════════\n\n");
+                }
+            }
+            
+            // Extraction matière
+            if (strlen(ligne) >= 10) {
                 InfoMatiere info;
-                if (extraire_matiere_ligne(ligne_temp, &info, semestre_actuel, 
+                if (extraire_matiere_ligne(ligne, &info, semestre_actuel, 
                                           strlen(module_courant) > 0 ? module_courant : NULL)) {
                     
-                    // Si c'est un MODULE (MCP)
                     if (strcmp(info.type, "MCP") == 0) {
                         strcpy(module_courant, info.code);
                         
-                        // Créer un nouveau module
-                        idx_module_courant = nb_modules;
-                        strncpy(modules[nb_modules].code_module, info.code, sizeof(modules[nb_modules].code_module) - 1);
-                        strncpy(modules[nb_modules].nom_module, info.nom, sizeof(modules[nb_modules].nom_module) - 1);
-                        modules[nb_modules].moyenne_module = info.note;
-                        modules[nb_modules].coef_module = info.coef;
-                        modules[nb_modules].semestre = semestre_actuel;
-                        modules[nb_modules].nb_matieres = 0;
-                        modules[nb_modules].est_valide = info.est_valide;
+                        // Enregistrer MCP S1 pour détection S2
+                        if (semestre_actuel == 1 && nb_mcp_s1 < 20) {
+                            mcp_codes_s1[nb_mcp_s1++] = atoi(&info.code[7]); // Extraire numéro
+                        }
+                        
+                        if (semestre_actuel == 1) nb_modules_s1++;
+                        else nb_modules_s2++;
                         
                         printf("📦 MODULE S%d: %s - %s (Coef: %.1f, Moy: %.2f) %s\n", 
                                semestre_actuel, info.code, info.nom, info.coef, info.note,
                                info.est_valide ? "✅" : "❌");
-                        
-                        nb_modules++;
-                    }
-                    // Si c'est un COURS (CP)
-                    else {
+                    } else {
                         Matiere *m = &eleve->matieres[eleve->nombre_matieres];
                         
-                        // Format amélioré avec module parent
-                        if (idx_module_courant >= 0) {
+                        if (strlen(module_courant) > 0) {
                             snprintf(m->nom_matiere, MAX_MATIERE - 1, "[S%d-%s|%s] %s - %s", 
-                                    info.semestre, info.type, 
-                                    modules[idx_module_courant].code_module,
+                                    info.semestre, info.type, module_courant,
                                     info.code, info.nom);
-                            
-                            // Ajouter au module
-                            int idx = modules[idx_module_courant].nb_matieres;
-                            strcpy(modules[idx_module_courant].codes_cp[idx], info.code);
-                            modules[idx_module_courant].notes_cp[idx] = info.note;
-                            modules[idx_module_courant].coefs_cp[idx] = info.coef;
-                            modules[idx_module_courant].nb_matieres++;
                         } else {
                             snprintf(m->nom_matiere, MAX_MATIERE - 1, "[S%d-%s] %s - %s", 
                                     info.semestre, info.type, info.code, info.nom);
@@ -514,6 +479,9 @@ int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
                         m->note = info.note;
                         m->coefficient = info.coef;
                         strcpy(m->appreciation, info.est_valide ? "Validé" : "");
+                        
+                        if (semestre_actuel == 1) nb_matieres_s1++;
+                        else nb_matieres_s2++;
                         
                         printf("  📝 %2d. %-60s | Note: %5.2f | Coef: %.1f %s\n",
                                eleve->nombre_matieres + 1, m->nom_matiere, m->note, m->coefficient,
@@ -525,110 +493,41 @@ int analyser_bulletin_texte(const char* texte_ocr, Eleve* eleve) {
             }
         }
         
-        ptr2 = (*fin_ligne == '\n') ? fin_ligne + 1 : fin_ligne;
+        ptr = (*fin_ligne == '\n') ? fin_ligne + 1 : fin_ligne;
     }
     
     free(texte_copie);
     
     printf("\n═══════════════════════════════════════════════\n");
-    printf("📊 Total: %d matière(s) + %d module(s)\n", eleve->nombre_matieres, nb_modules);
+    printf("📊 RÉSULTATS D'EXTRACTION\n");
+    printf("═══════════════════════════════════════════════\n");
+    printf("📘 Semestre 1: %d cours + %d modules\n", nb_matieres_s1, nb_modules_s1);
     
-    if (eleve->nombre_matieres > 0 || nb_modules > 0) {
+    if (nb_matieres_s2 > 0 || nb_modules_s2 > 0) {
+        printf("📗 Semestre 2: %d cours + %d modules\n", nb_matieres_s2, nb_modules_s2);
+    }
+    
+    printf("📊 Total: %d matière(s)\n", eleve->nombre_matieres);
+    printf("═══════════════════════════════════════════════\n\n");
+    
+    if (eleve->nombre_matieres > 0) {
         calculer_moyenne(eleve);
-        
-        // Statistiques détaillées
-        int nb_s1 = 0, nb_s2 = 0, nb_mcp = 0, nb_cp = 0;
-        int val_s1 = 0, val_s2 = 0;
-        float moy_s1 = 0, moy_s2 = 0, moy_mcp = 0, moy_cp = 0;
-        float coef_s1 = 0, coef_s2 = 0, coef_mcp = 0, coef_cp = 0;
-        
-        // Compter modules
-        for (int i = 0; i < nb_modules; i++) {
-            if (modules[i].semestre == 1) {
-                nb_mcp++;
-                moy_mcp += modules[i].moyenne_module * modules[i].coef_module;
-                coef_mcp += modules[i].coef_module;
-                if (modules[i].est_valide) val_s1++;
-            } else {
-                if (modules[i].est_valide) val_s2++;
-            }
-        }
-        
-        // Compter CP
-        for (int i = 0; i < eleve->nombre_matieres; i++) {
-            if (strstr(eleve->matieres[i].nom_matiere, "[S1-")) {
-                nb_s1++;
-                moy_s1 += eleve->matieres[i].note * eleve->matieres[i].coefficient;
-                coef_s1 += eleve->matieres[i].coefficient;
-            } else if (strstr(eleve->matieres[i].nom_matiere, "[S2-")) {
-                nb_s2++;
-                moy_s2 += eleve->matieres[i].note * eleve->matieres[i].coefficient;
-                coef_s2 += eleve->matieres[i].coefficient;
-            }
-            
-            if (strstr(eleve->matieres[i].nom_matiere, "-CP")) {
-                nb_cp++;
-                moy_cp += eleve->matieres[i].note * eleve->matieres[i].coefficient;
-                coef_cp += eleve->matieres[i].coefficient;
-            }
-        }
-        
-        printf("\n📈 STATISTIQUES DÉTAILLÉES\n");
-        printf("─────────────────────────────────────────────\n");
-        
-        if (nb_s1 > 0 || nb_modules > 0) {
-            printf("📘 Semestre 1: %d cours + %d modules", nb_s1, nb_mcp);
-            if (coef_s1 + coef_mcp > 0) {
-                printf(" | Moyenne: %.2f/20", (moy_s1 + moy_mcp) / (coef_s1 + coef_mcp));
-            }
-            printf(" | Validés: %d\n", val_s1);
-        }
-        
-        if (nb_s2 > 0) {
-            printf("📗 Semestre 2: %d cours", nb_s2);
-            if (coef_s2 > 0) {
-                printf(" | Moyenne: %.2f/20", moy_s2 / coef_s2);
-            }
-            printf(" | Validés: %d\n", val_s2);
-        }
-        
-        printf("\n");
-        
-        if (nb_modules > 0) {
-            printf("📦 Modules (MCP): %d", nb_modules);
-            if (coef_mcp > 0) {
-                printf(" | Moyenne: %.2f/20", moy_mcp / coef_mcp);
-            }
-            printf("\n");
-        }
-        
-        if (nb_cp > 0) {
-            printf("📝 Cours (CP): %d", nb_cp);
-            if (coef_cp > 0) {
-                printf(" | Moyenne: %.2f/20", moy_cp / coef_cp);
-            }
-            printf("\n");
-        }
-        
-        printf("─────────────────────────────────────────────\n");
-        printf("🎯 Moyenne générale: %.2f/20\n", eleve->moyenne_generale);
-        printf("═══════════════════════════════════════════════\n\n");
+        printf("🎯 Moyenne générale: %.2f/20\n\n", eleve->moyenne_generale);
         return 1;
     }
     
-    printf("❌ Aucune matière détectée\n");
-    printf("═══════════════════════════════════════════════\n\n");
+    printf("❌ Aucune matière détectée\n\n");
     return 0;
 }
 
-// ========== SAISIE MANUELLE ==========
+// ========== SAISIE MANUELLE (INCHANGÉ) ==========
 
 void saisir_bulletin_manuel(sqlite3 *db) {
     Eleve eleve;
     
-    printf("\n╔══════════════════════════════════════════╗\n");
+    printf("\n╔═══════════════════════════════════════╗\n");
     printf("║  SAISIE MANUELLE D'UN BULLETIN        ║\n");
-    printf("╚══════════════════════════════════════════╝\n\n");
+    printf("╚═══════════════════════════════════════╝\n\n");
     
     strcpy(eleve.matricule, "N/A");
     strcpy(eleve.niveau, "N/A");
